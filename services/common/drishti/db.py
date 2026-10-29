@@ -258,6 +258,13 @@ def get_alert_image(alert_id: str) -> bytes | None:
     return bytes(row["image"]) if row and row["image"] else None
 
 
+def get_alert_image_by_frame(tenant_id: str, frame_id: str) -> bytes | None:
+    with _conn(tenant_id) as c:
+        row = c.execute("SELECT image FROM alerts WHERE tenant_id=%s AND frame_id=%s AND image IS NOT NULL LIMIT 1",
+                        (tenant_id, frame_id)).fetchone()
+    return bytes(row["image"]) if row and row["image"] else None
+
+
 def ack_alert(alert_id: str, tenant_id: str, false_alarm: bool) -> None:
     with _conn(tenant_id) as c:
         c.execute(

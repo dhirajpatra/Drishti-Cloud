@@ -13,11 +13,12 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
 from drishti import bus
+from drishti.config import settings
 from drishti.log import get_logger
 from drishti.rules import norm_label
 
 log = get_logger("image-alert")
-COLORS = {"CRITICAL": (239, 68, 68), "ALERT": (245, 158, 11)}
+COLORS = {"CRITICAL": (239, 68, 68), "ALERT": (245, 158, 11), "NORMAL": (34, 160, 90)}
 
 
 def _font(size: int):
@@ -27,8 +28,10 @@ def _font(size: int):
         return ImageFont.load_default()
 
 
-def render(jpeg: bytes, p: dict) -> bytes:
+def render(jpeg: bytes, p: dict, max_width: int | None = None, quality: int = 82) -> bytes:
     img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+    if max_width and img.width > max_width:
+        img = img.resize((max_width, round(img.height * max_width / img.width)))
     w, h = img.size
     color = COLORS.get(p["level"], (239, 68, 68))
     d = ImageDraw.Draw(img, "RGBA")
@@ -49,7 +52,7 @@ def render(jpeg: bytes, p: dict) -> bytes:
     d.rectangle([0, 0, w, bar], fill=color + (230,))
     stamp = datetime.now().strftime("%H:%M:%S")
     d.text((8, bar // 2 - f.size // 2 if hasattr(f, "size") else 4),
-           f"{p['level']}  {p.get('rule') or 'alert'}   {p['tenant_id']} / {p.get('camera_id', '')}   {stamp}",
+           f"{p['level']}  {p.get('rule') or ('normal' if p['level'] == 'NORMAL' else 'alert')}   {p['tenant_id']} / {p.get('camera_id', '')}   {stamp}",
            fill=(255, 255, 255, 255), font=f)
     lines = textwrap.wrap(p.get("reason", ""), width=max(20, w // 8))[:3]
     if lines:
@@ -58,20 +61,25 @@ def render(jpeg: bytes, p: dict) -> bytes:
         for i, line in enumerate(lines):
             d.text((8, h - box_h - 4 + i * (f.size if hasattr(f, "size") else 11) + 2), line, fill=(255, 255, 255, 255), font=f)
     out = io.BytesIO()
-    img.save(out, "JPEG", quality=82)
+    img.save(out, "JPEG", quality=quality)
     return out.getvalue()
 
 
 def handle(p: dict, r) -> None:
     tid = p["tenant_id"]
     has_proof = False
+    jpeg = bus.get_frame(p["frame_id"])
     if p["level"] != "NORMAL":
-        jpeg = bus.get_frame(p["frame_id"])
         if jpeg is None:
             log.warning("frame %s expired - alert goes out without image proof", p["frame_id"])
         else:
             bus.put_proof(p["frame_id"], render(jpeg, p))
             has_proof = True
+    if jpeg is not None and settings.event_images:
+        try:
+            bus.put_snapshot(tid, p["frame_id"], render(jpeg, p, max_width=480, quality=70))
+        except Exception:  # noqa: BLE001 - a thumbnail must never block the pipeline
+            log.exception("snapshot failed for %s", p["frame_id"])
     bus.publish("proofed", tid, {**p, "has_proof": has_proof}, r)
 
 

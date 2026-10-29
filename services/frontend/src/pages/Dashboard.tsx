@@ -88,7 +88,7 @@ export default function Dashboard() {
             <LiveCameras key={tenant.id} tenantId={tenant.id} />
             <AlertFeed alerts={alerts.data} loading={alerts.loading} error={alerts.error} reload={alerts.reload} />
             <div className="grid xl:grid-cols-2 gap-4">
-              <EventTimeline events={events.data} loading={events.loading} error={events.error} />
+              <EventTimeline tenantId={tenant.id} events={events.data} loading={events.loading} error={events.error} />
               <ActuationList items={acts.data} loading={acts.loading} error={acts.error} />
             </div>
             <div className="grid xl:grid-cols-2 gap-4">

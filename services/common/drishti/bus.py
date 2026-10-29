@@ -91,6 +91,15 @@ def list_cameras(tenant_id: str) -> list[dict]:
     return sorted(out, key=lambda c: c["camera_id"])
 
 
+def put_snapshot(tenant_id: str, frame_id: str, jpeg: bytes) -> None:
+    """Small annotated picture of ANY analysed frame (incl. NORMAL ones) for the event timeline."""
+    redis_bin().set(f"snap:{tenant_id}:{frame_id}", jpeg, ex=settings.event_image_ttl_sec)
+
+
+def get_snapshot(tenant_id: str, frame_id: str) -> bytes | None:
+    return redis_bin().get(f"snap:{tenant_id}:{frame_id}")
+
+
 def put_proof(frame_id: str, jpeg: bytes) -> None:
     redis_bin().set(f"proof:{frame_id}", jpeg, ex=settings.frame_ttl_sec)
 

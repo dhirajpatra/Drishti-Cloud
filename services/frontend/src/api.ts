@@ -136,6 +136,10 @@ export const api = {
     const res = await raw(`/tenants/${encodeURIComponent(id)}/cameras/${encodeURIComponent(cam)}/latest`);
     return res.blob();
   },
+  eventImageBlob: async (tenantId: string, frameId: string): Promise<Blob> => {
+    const res = await raw(`/tenants/${encodeURIComponent(tenantId)}/events/${encodeURIComponent(frameId)}/image`);
+    return res.blob();
+  },
   ingest: (tenantId: string, file: File, sensors: string, cameraId: string, force: boolean) => {
     const fd = new FormData();
     fd.append("file", file);

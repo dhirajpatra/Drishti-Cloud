@@ -1,10 +1,33 @@
-import type { Actuation, EventRow } from "../api";
+import { useEffect, useState } from "react";
+import { ImageOff } from "lucide-react";
+import { api, type Actuation, type EventRow } from "../api";
 import { clock, humanize, LEVEL_COLOR, relTime, useNow } from "../lib";
 import { Chip, Empty, ErrorLine, Panel, Pill } from "./ui";
 
 const DECISION_COLOR: Record<string, string> = { CRITICAL: LEVEL_COLOR.CRITICAL, ALERT: LEVEL_COLOR.ALERT, SUPPRESSED: "#a78bfa" };
 
-export function EventTimeline({ events, loading, error }: { events: EventRow[] | undefined; loading: boolean; error: string | null }) {
+// frame_id -> object URL, or "none" when the picture expired / was never kept. Survives the 5 s polling re-renders.
+const thumbCache = new Map<string, string>();
+const THUMB_WINDOW_MS = 6 * 3600_000; // matches EVENT_IMAGE_TTL_SEC default; older NORMAL events have no picture
+
+function EventThumb({ tenantId, e }: { tenantId: string; e: EventRow }) {
+  const key = `${tenantId}/${e.frame_id}`;
+  const worthTrying = e.level !== "NORMAL" || Date.now() - new Date(e.created_at).getTime() < THUMB_WINDOW_MS;
+  const [url, setUrl] = useState<string | undefined>(thumbCache.get(key));
+  useEffect(() => {
+    if (!worthTrying || thumbCache.has(key)) { setUrl(thumbCache.get(key)); return; }
+    let alive = true;
+    api.eventImageBlob(tenantId, e.frame_id)
+      .then((b) => { const u = URL.createObjectURL(b); thumbCache.set(key, u); if (alive) setUrl(u); })
+      .catch(() => { thumbCache.set(key, "none"); if (alive) setUrl("none"); });
+    return () => { alive = false; };
+  }, [key, tenantId, e.frame_id, worthTrying]);
+  if (!url) return <div className="w-16 h-12 rounded" style={{ background: worthTrying ? "#05080f" : "transparent" }} />;
+  if (url === "none") return <div className="w-16 h-12 grid place-items-center" style={{ color: "var(--muted)" }}><ImageOff size={14} /></div>;
+  return <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Event frame" className="w-16 h-12 object-cover rounded border" style={{ borderColor: "var(--line)" }} /></a>;
+}
+
+export function EventTimeline({ tenantId, events, loading, error }: { tenantId: string; events: EventRow[] | undefined; loading: boolean; error: string | null }) {
   const rows = events?.slice(0, 30);
   return (
     <Panel kicker="EVENT TIMELINE" title="Recent events">
@@ -13,15 +36,16 @@ export function EventTimeline({ events, loading, error }: { events: EventRow[] |
       {events && events.length === 0 && <Empty>No events yet. Send a test frame.</Empty>}
       {rows && rows.length > 0 && (
         <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-          <table className="w-full text-left min-w-[520px]">
+          <table className="w-full text-left min-w-[600px]">
             <thead>
               <tr className="mono text-[10px] tracking-widest sticky top-0" style={{ color: "var(--muted)", background: "var(--surface)" }}>
-                <th className="py-1.5 pr-3 font-normal">TIME</th><th className="pr-3 font-normal">CAMERA</th><th className="pr-3 font-normal">LEVEL</th><th className="pr-3 font-normal">DECISION</th><th className="font-normal">REASON</th>
+                <th className="py-1.5 pr-3 font-normal">PICTURE</th><th className="pr-3 font-normal">TIME</th><th className="pr-3 font-normal">CAMERA</th><th className="pr-3 font-normal">LEVEL</th><th className="pr-3 font-normal">DECISION</th><th className="font-normal">REASON</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((e) => (
                 <tr key={`${e.frame_id}-${e.created_at}`} className="border-t text-[12px] align-top" style={{ borderColor: "var(--line)" }}>
+                  <td className="py-1.5 pr-3"><EventThumb tenantId={tenantId} e={e} /></td>
                   <td className="mono py-1.5 pr-3 whitespace-nowrap">{clock(e.created_at)}</td>
                   <td className="mono pr-3 whitespace-nowrap" style={{ color: "var(--muted)" }}>{e.camera_id}</td>
                   <td className="pr-3"><Pill color={LEVEL_COLOR[e.level]}>{e.level}</Pill></td>

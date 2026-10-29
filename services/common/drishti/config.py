@@ -55,6 +55,8 @@ class Settings:
 
         # --- cost control (LOW_COST_MODE)
         self.low_cost_mode = _b("LOW_COST_MODE", True)
+        self.event_images = _b("EVENT_IMAGES", True)               # keep a small annotated snapshot of every analysed frame
+        self.event_image_ttl_sec = _i("EVENT_IMAGE_TTL_SEC", 21600)  # ...for this long (default 6 h)
         self.sample_interval_sec = _i("SAMPLE_INTERVAL_SEC", 30)
         self.hash_distance = _i("HASH_DISTANCE", 6)          # dhash bits that may differ = "same scene"
         self.force_refresh_sec = _i("FORCE_REFRESH_SEC", 300)  # re-analyse a static scene at least this often

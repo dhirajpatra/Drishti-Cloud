@@ -111,3 +111,29 @@ def test_false_alarm_ack_teaches_habit(client, agents, redis_c, fake_graph):
     n = len(fake_graph.habits("mall_1"))
     assert client.post(f"/alerts/{alert['id']}/ack", json={"false_alarm": True}).json() == {"ok": True}
     assert len(fake_graph.habits("mall_1")) == n + 1
+
+
+def test_every_event_gets_a_picture_even_normal_ones(client, agents, redis_c):
+    """A NORMAL frame has no alert, yet the event timeline still shows what the camera saw; other tenants cannot fetch it."""
+    redis_c.flushdb()
+    r = post(client, "mall_1", {"pir": True, "_sim": {"hour": 14, "objects": [{"label": "person", "count": 3}]}})
+    run_pipeline(redis_c, agents)
+    fid = r.json()["frame_id"]
+    ev = next(e for e in client.get("/tenants/mall_1/events").json() if e["frame_id"] == fid)
+    assert ev["level"] == "NORMAL"
+    img = client.get(f"/tenants/mall_1/events/{fid}/image")
+    assert img.status_code == 200 and img.headers["content-type"] == "image/jpeg"
+    assert Image.open(io.BytesIO(img.content)).width <= 480
+    assert client.get(f"/tenants/school_1/events/{fid}/image").status_code == 404   # tenant-scoped
+    assert client.get("/tenants/mall_1/events/nope/image").status_code == 404
+
+
+def test_alert_event_picture_falls_back_to_stored_proof(client, agents, redis_c):
+    redis_c.flushdb()
+    tenant, sensors = CASES[1][0], CASES[1][1]
+    r = post(client, tenant, sensors)
+    run_pipeline(redis_c, agents)
+    fid = r.json()["frame_id"]
+    redis_c.delete(f"snap:{tenant}:{fid}")                      # snapshot expired ...
+    img = client.get(f"/tenants/{tenant}/events/{fid}/image")   # ... the alert's persisted proof is still served
+    assert img.status_code == 200
