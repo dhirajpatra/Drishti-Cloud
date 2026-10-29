@@ -4,6 +4,7 @@ import { usePoll, verticalColor } from "../lib";
 import { TenantList, ApiKeyBox } from "../components/TenantList";
 import { AlertFeed } from "../components/AlertFeed";
 import { ActuationList, EventTimeline } from "../components/EventsActuations";
+import { LiveCameras } from "../components/LiveCameras";
 import { TestFrame } from "../components/TestFrame";
 import { KnowledgeGraph } from "../components/KnowledgeGraph";
 import { Stat } from "../components/ui";
@@ -84,6 +85,7 @@ export default function Dashboard() {
               <Stat label="Vertical levels" value={vstats.data ? `${vstats.data.by_level.NORMAL}/${vstats.data.by_level.ALERT}/${vstats.data.by_level.CRITICAL}` : "-"} color={vColor} sub="normal / alert / critical" />
               <Stat label="LLM calls today" value={llmTotal ?? "-"} color="var(--accent2)" sub={llmSub} />
             </div>
+            <LiveCameras key={tenant.id} tenantId={tenant.id} />
             <AlertFeed alerts={alerts.data} loading={alerts.loading} error={alerts.error} reload={alerts.reload} />
             <div className="grid xl:grid-cols-2 gap-4">
               <EventTimeline events={events.data} loading={events.loading} error={events.error} />

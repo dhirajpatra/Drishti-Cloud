@@ -207,6 +207,8 @@ def ingest(
     img.save(buf, "JPEG", quality=80)
     jpeg = buf.getvalue()
 
+    bus.put_latest(tenant_id, camera_id, jpeg)   # dashboard live view, independent of dedupe / analysis
+
     # --- LOW_COST_MODE: static scene -> reuse cached segmentation / skip model calls
     h = dhash(img)
     hkey = f"scenehash:{tenant_id}:{camera_id}"
@@ -238,6 +240,23 @@ def _iso(rows: list[dict], *fields: str) -> list[dict]:
             if row.get(f) is not None:
                 row[f] = row[f].isoformat()
     return rows
+
+
+@app.get("/tenants/{tenant_id}/cameras")
+def cameras(tenant_id: str, request: Request):
+    require_tenant(tenant_id, request)
+    return bus.list_cameras(tenant_id)
+
+
+@app.get("/tenants/{tenant_id}/cameras/{camera_id}/latest")
+def camera_latest(tenant_id: str, camera_id: str, request: Request):
+    require_tenant(tenant_id, request)
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", camera_id):
+        raise HTTPException(422, "bad camera_id")
+    img = bus.get_latest(tenant_id, camera_id)
+    if img is None:
+        raise HTTPException(404, "no frame received from this camera yet")
+    return Response(img, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/tenants/{tenant_id}/alerts")

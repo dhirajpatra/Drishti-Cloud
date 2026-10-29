@@ -70,6 +70,27 @@ def get_frame(frame_id: str) -> bytes | None:
     return redis_bin().get(f"frame:{frame_id}")
 
 
+LATEST_TTL = 86400
+
+
+def put_latest(tenant_id: str, camera_id: str, jpeg: bytes) -> None:
+    """Keep the newest frame of every camera (even deduped 'static' ones) for the dashboard's live view."""
+    redis_bin().set(f"latest:{tenant_id}:{camera_id}", jpeg, ex=LATEST_TTL)
+    redis_client().set(f"latestts:{tenant_id}:{camera_id}", utcnow_iso(), ex=LATEST_TTL)
+
+
+def get_latest(tenant_id: str, camera_id: str) -> bytes | None:
+    return redis_bin().get(f"latest:{tenant_id}:{camera_id}")
+
+
+def list_cameras(tenant_id: str) -> list[dict]:
+    r = redis_client()
+    out = []
+    for key in r.scan_iter(f"latestts:{tenant_id}:*"):
+        out.append({"camera_id": key.split(":", 2)[2], "updated_at": r.get(key)})
+    return sorted(out, key=lambda c: c["camera_id"])
+
+
 def put_proof(frame_id: str, jpeg: bytes) -> None:
     redis_bin().set(f"proof:{frame_id}", jpeg, ex=settings.frame_ttl_sec)
 

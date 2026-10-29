@@ -95,3 +95,18 @@ def test_graph_and_stats_endpoints(client):
     assert any("Tenant" in n["labels"] for n in g["nodes"])
     assert client.get("/verticals/mall_security/stats").status_code == 200
     assert client.get("/verticals/nope/stats").status_code == 404
+
+
+def test_latest_frame_visible_even_when_deduped(client):
+    """The live view shows the newest frame of every camera, including frames LOW_COST_MODE skips analysing."""
+    for _ in range(2):  # second identical frame is 'static' and never reaches the models
+        r = client.post("/ingest/mall_1", files={"file": ("f.jpg", jpeg(), "image/jpeg")}, data={"camera_id": "door_cam"})
+        assert r.status_code == 200
+    cams = {c["camera_id"]: c for c in client.get("/tenants/mall_1/cameras").json()}
+    assert cams["door_cam"]["updated_at"]
+    img = client.get("/tenants/mall_1/cameras/door_cam/latest")
+    assert img.status_code == 200 and img.headers["content-type"] == "image/jpeg"
+    Image.open(io.BytesIO(img.content)).verify()
+    assert client.get("/tenants/mall_1/cameras/nope/latest").status_code == 404
+    assert client.get("/tenants/mall_1/cameras/bad..id/latest").status_code in (404, 422)
+    assert client.get("/tenants/ghost/cameras").status_code == 404

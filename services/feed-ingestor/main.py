@@ -39,7 +39,24 @@ def parse_feeds(spec: str) -> list[dict]:
     return feeds
 
 
+def grab_snapshot(url: str) -> bytes | None:
+    """http(s) URL that answers with ONE jpeg (motionEye /picture/<n>/current/, ESP32-CAM /capture, phone apps).
+    Returns None for anything else (e.g. an MJPEG multipart stream) so the caller can use OpenCV instead."""
+    with httpx.stream("GET", url, timeout=10, follow_redirects=True) as resp:
+        ctype = resp.headers.get("content-type", "").lower()
+        if resp.status_code != 200 or not ctype.startswith("image/"):
+            return None
+        return resp.read()
+
+
 def grab(feed: dict) -> bytes | None:
+    if feed["url"].lower().startswith(("http://", "https://")):
+        try:
+            data = grab_snapshot(feed["url"])
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"snapshot request failed: {exc}") from exc
+        if data:
+            return data
     url, is_file = feed["url"], not feed["url"].lower().startswith(("rtsp://", "rtsps://", "http://", "https://"))
     key = f"{feed['tenant']}:{feed['camera']}"
     cap = cv2.VideoCapture(url)
