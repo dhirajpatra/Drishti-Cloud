@@ -24,7 +24,8 @@ from drishti.log import get_logger
 log = get_logger("news-context")
 
 PROVIDER = os.getenv("NEWS_PROVIDER", "freenewsapi").strip().lower()
-API_URL = os.getenv("NEWS_API_URL", "https://freenewsapi.io/v1/news").strip()
+API_URL = os.getenv("NEWS_API_URL", "").strip()          # empty = auto: try the hosts below and remember the first that answers
+HOSTS = ["https://api.freenewsapi.io/v1/news", "https://freenewsapi.io/v1/news", "https://www.freenewsapi.io/v1/news"]  # 1st = per the docs
 AUTH = os.getenv("NEWS_AUTH", "auto").strip()            # auto | bearer | x-api-key | query:<param name>
 COUNTRY = os.getenv("NEWS_COUNTRY", "IN").strip()
 LANGUAGE = os.getenv("NEWS_LANGUAGE", "en").strip()
@@ -39,9 +40,10 @@ ALIASES = {
     "gurugram": ["Gurugram", "Gurgaon"], "gurgaon": ["Gurugram", "Gurgaon"],
     "delhi": ["Delhi", "New Delhi"], "new delhi": ["New Delhi", "Delhi"],
 }
-AUTH_ORDER = ["bearer", "x-api-key", "query:api_key", "query:apikey", "query:key"]
+AUTH_ORDER = ["x-api-key", "bearer", "query:api_key", "query:apikey", "query:key"]   # 1st = per the docs (-H "x-api-key: KEY")
 
 _auth_ok: str | None = None            # auth scheme that worked, remembered for the process lifetime
+_host_ok: str | None = None            # endpoint that worked
 _published_after_ok = True             # flips off if the API rejects the published_after filter
 
 
@@ -79,25 +81,47 @@ def parse_ts(value: str | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _request(params: dict) -> dict:
-    """GET the freenewsapi endpoint, finding (and remembering) how this account authenticates."""
-    global _auth_ok
-    schemes = [_auth_ok] if _auth_ok else (AUTH_ORDER if AUTH == "auto" else [AUTH])
-    last = None
-    for scheme in schemes:
-        headers, p = apply_auth(scheme, settings.news_api_key, params)
-        resp = httpx.get(API_URL, headers=headers, params=p, timeout=15)
-        if resp.status_code in (401, 403):
-            last = resp
+def _get(url: str, headers: dict, params: dict) -> httpx.Response:
+    """GET following up to 3 redirects ourselves: httpx drops Authorization when a redirect changes host
+    (freenewsapi.io -> www.freenewsapi.io), which would turn a valid key into a false 401."""
+    for _ in range(4):
+        resp = httpx.get(url, headers=headers, params=params, timeout=15)
+        if resp.status_code in (301, 302, 307, 308) and resp.headers.get("location"):
+            url, params = str(httpx.URL(url).join(resp.headers["location"])).split("?")[0], params
             continue
-        resp.raise_for_status()
-        if _auth_ok != scheme:
-            _auth_ok = scheme
-            log.info("news API accepted auth scheme %r", scheme)
-        return resp.json()
-    raise NewsAuthError(f"HTTP {last.status_code if last is not None else '?'} from {API_URL} with every auth scheme tried "
-                        f"({', '.join(schemes)}). Check NEWS_API_KEY, and set NEWS_API_URL / NEWS_AUTH to what your "
-                        "freenewsapi.io dashboard shows.")
+        return resp
+    return resp
+
+
+def _request(params: dict) -> dict:
+    """GET the freenewsapi endpoint, finding (and remembering) which host and auth scheme this account uses."""
+    global _auth_ok, _host_ok
+    hosts = [_host_ok] if _host_ok else ([API_URL] if API_URL else HOSTS)
+    schemes = [_auth_ok] if _auth_ok else (AUTH_ORDER if AUTH == "auto" else [AUTH])
+    last, unreachable = None, []
+    for host in hosts:
+        for scheme in schemes:
+            headers, p = apply_auth(scheme, settings.news_api_key, params)
+            try:
+                resp = _get(host, headers, p)
+            except httpx.TransportError as exc:               # DNS failure / refused: wrong host, try the next one
+                unreachable.append(f"{host} ({type(exc).__name__})")
+                break
+            if resp.status_code == 404 and len(hosts) > 1:
+                unreachable.append(f"{host} (404)")
+                break
+            if resp.status_code in (401, 403):
+                last = resp
+                continue
+            resp.raise_for_status()
+            if (_host_ok, _auth_ok) != (host, scheme):
+                _host_ok, _auth_ok = host, scheme
+                log.info("news API works with %s and auth scheme %r", host, scheme)
+            return resp.json()
+    detail = (f"HTTP {last.status_code} with every auth scheme tried ({', '.join(schemes)})" if last is not None
+              else f"no usable endpoint ({'; '.join(unreachable) or 'none tried'})")
+    raise NewsAuthError(f"{detail}. Check NEWS_API_KEY, and set NEWS_API_URL / NEWS_AUTH to what your freenewsapi.io "
+                        "dashboard shows.")
 
 
 def _free_query(extra: dict) -> list[dict]:

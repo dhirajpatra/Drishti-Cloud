@@ -37,6 +37,8 @@ class FakeAPI:
 @pytest.fixture(autouse=True)
 def reset(monkeypatch):
     monkeypatch.setattr(nc, "_auth_ok", None)
+    monkeypatch.setattr(nc, "_host_ok", None)
+    monkeypatch.setattr(nc, "API_URL", "")
     monkeypatch.setattr(nc, "_published_after_ok", True)
     monkeypatch.setattr(nc.settings, "news_api_key", "KEY")
 
@@ -103,3 +105,51 @@ def test_published_after_rejected_falls_back(monkeypatch):
     monkeypatch.setattr(nc.httpx, "get", api)
     assert nc.fetch_local("Chennai", national=lambda: [])[0]["headline"] == "Chennai flood alert"
     assert nc._published_after_ok is False
+
+
+def test_host_discovery_skips_dead_hosts_and_remembers(monkeypatch):
+    calls = []
+
+    def api(url, headers=None, params=None, timeout=None):
+        calls.append(url)
+        req = httpx.Request("GET", url)
+        if "www." not in url:
+            raise httpx.ConnectError("no such host", request=req)
+        return httpx.Response(200, request=req, json={"data": [row("Pune rains")]})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    assert nc.fetch_local("Pune", national=lambda: [])[0]["headline"] == "Pune rains"
+    assert nc._host_ok == "https://www.freenewsapi.io/v1/news"
+    calls.clear()
+    nc.fetch_local("Pune", national=lambda: [])
+    assert set(calls) == {"https://www.freenewsapi.io/v1/news"}           # no re-probing
+
+
+def test_redirect_across_hosts_keeps_authorization(monkeypatch):
+    seen = []
+
+    def api(url, headers=None, params=None, timeout=None):
+        seen.append((url, (headers or {}).get("X-API-Key")))
+        req = httpx.Request("GET", url)
+        if url == "https://freenewsapi.io/v1/news":
+            return httpx.Response(301, request=req, headers={"location": "https://www.freenewsapi.io/v1/news"})
+        return httpx.Response(200, request=req, json={"data": [row("Delhi smog")]})
+
+    monkeypatch.setattr(nc, "HOSTS", ["https://freenewsapi.io/v1/news"])
+    monkeypatch.setattr(nc.httpx, "get", api)
+    assert nc.fetch_local("Delhi", national=lambda: [])[0]["headline"] == "Delhi smog"
+    assert seen[-1] == ("https://www.freenewsapi.io/v1/news", "KEY")      # key survives the cross-host redirect
+
+
+def test_first_request_matches_documented_format(monkeypatch):
+    """docs: curl "https://api.freenewsapi.io/v1/news?language=en&country=us" -H "x-api-key: YOUR_API_KEY" """
+    calls = []
+
+    def api(url, headers=None, params=None, timeout=None):
+        calls.append((url, dict(headers or {})))
+        return httpx.Response(200, request=httpx.Request("GET", url), json={"data": [row("Pune rains")]})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    nc.fetch_local("Pune", national=lambda: [])
+    assert calls[0][0] == "https://api.freenewsapi.io/v1/news" and calls[0][1] == {"X-API-Key": "KEY"}
+    assert len(calls) == 1                                                    # worked first time: no probing
