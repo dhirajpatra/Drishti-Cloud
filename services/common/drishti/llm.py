@@ -96,7 +96,10 @@ def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700, temper
         }
         
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            print(f"Meta API Error {resp.status_code}: {resp.text}")
+            log.error(f"Meta API Error {resp.status_code}: {resp.text}")
+            resp.raise_for_status()
         data = resp.json()
         
         # New API format: output[0].content[0].text contains JSON
