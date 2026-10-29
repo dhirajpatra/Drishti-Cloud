@@ -113,6 +113,8 @@ def _request(params: dict) -> dict:
             if resp.status_code in (401, 403):
                 last = resp
                 continue
+            if resp.status_code >= 400:
+                log.error("news API %s -> HTTP %s: %s", host, resp.status_code, resp.text[:300].replace("\n", " "))
             resp.raise_for_status()
             if (_host_ok, _auth_ok) != (host, scheme):
                 _host_ok, _auth_ok = host, scheme
@@ -125,21 +127,26 @@ def _request(params: dict) -> dict:
 
 
 def _free_query(extra: dict) -> list[dict]:
+    """One search. `published_after` has no documented format, so if the API chokes on it (400/422/5xx) the same
+    query is retried without it - and only if THAT works is the filter switched off (age is then checked locally)."""
     global _published_after_ok
     params = {"language": LANGUAGE, "country": COUNTRY, **extra}
     if ORDER_BY:
         params["order_by"] = ORDER_BY
+    if not _published_after_ok:
+        return _request(params).get("data") or []
     after = (datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_H)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        data = _request({**params, **({"published_after": after} if _published_after_ok else {})})
+        return _request({**params, "published_after": after}).get("data") or []
     except httpx.HTTPStatusError as exc:
-        if _published_after_ok and exc.response.status_code in (400, 422):
-            _published_after_ok = False          # filter not supported by this plan/API: rely on the client-side age check
-            log.warning("news API rejected published_after - filtering by age locally")
-            data = _request(params)
-        else:
+        code = exc.response.status_code
+        if code not in (400, 422) and code < 500:
             raise
-    return data.get("data") or []
+        log.warning("news API answered HTTP %s to a query with published_after - retrying without it", code)
+        data = _request(params)                      # still failing -> raises, filter stays on
+        _published_after_ok = False
+        log.warning("published_after is not usable with this API - filtering by age locally from now on")
+        return data.get("data") or []
 
 
 def normalise(items: list[dict], now: datetime | None = None) -> list[dict]:
