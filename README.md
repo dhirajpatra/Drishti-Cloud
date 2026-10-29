@@ -192,9 +192,16 @@ cp .env.example .env
 
 ### 2. Run All Services
 ```bash
-docker compose up -d
+./start.sh
 docker compose logs -f spark-multimodal
 ```
+
+Stop and remove the containers and Compose network while keeping stored data:
+```bash
+./stop.sh
+```
+
+To also delete the database volumes and all stored data, run `./stop.sh --volumes`.
 
 Services:
 - Gateway: http://localhost:8000
@@ -305,7 +312,9 @@ A harmless `IN_CONTEXT ... not available` warning in the gateway log just means 
 **Local news:** `news-context` reads each tenant's `location` (where its cameras are), scans the newest national headlines (`NEWS_SCAN_PAGES` pages, since freenewsapi's title search currently errors) for that city (freenewsapi.io; "Bengaluru" also searches "Bangalore"), keeps the top 5 (`NEWS_MAX_ITEMS`) from the last
 48 h, and fills gaps with the country's top headlines marked `(national)`. Check it with query 9 above, or
 `docker compose logs news-context --tail=20` (look for `news for home_1_bangalore (Bengaluru): 5 item(s)`). The Wonder
-agent escalates an ALERT to CRITICAL when a headline matches that rule's hazard words (e.g. bomb, riot, flood).
+agent escalates an ALERT to CRITICAL when a headline matches that rule's hazard words (e.g. bomb, riot, flood). If using
+the legacy `newsapi.org` provider (`NEWS_PROVIDER=newsapi`), `NEWS_API_KEY` must be a valid NewsAPI.org key; a 401/403
+is reported as an authentication error and skips the current refresh.
 
 ### 5. Edge Pi Setup (Optional)
 ```bash

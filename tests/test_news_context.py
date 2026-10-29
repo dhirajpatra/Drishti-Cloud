@@ -153,6 +153,32 @@ def test_wrong_key_gives_actionable_error(monkeypatch):
     monkeypatch.setattr(nc.httpx, "get", FakeAPI(feed(3)))
     with pytest.raises(nc.NewsAuthError, match="NEWS_API_URL"):
         nc.scan_country(1)
+        nc.fetch_local("Delhi")
+
+
+def test_newsapi_org_rejected_key_gives_actionable_error(monkeypatch):
+    def api(url, headers=None, params=None, timeout=None):
+        req = httpx.Request("GET", url)
+        return httpx.Response(401, request=req, json={"code": "apiKeyInvalid"})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    with pytest.raises(nc.NewsAuthError, match="valid NewsAPI.org key"):
+        nc.fetch_newsapi_org("Delhi")
+
+
+def test_published_after_rejected_falls_back(monkeypatch):
+    seen = []
+
+    def api(url, headers=None, params=None, timeout=None):
+        seen.append(dict(params))
+        req = httpx.Request("GET", url)
+        if "published_after" in params:
+            return httpx.Response(422, request=req, json={"error": "bad filter"})
+        return httpx.Response(200, request=req, json={"data": [row("Chennai flood alert")]})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    assert nc.fetch_local("Chennai", national=lambda: [])[0]["headline"] == "Chennai flood alert"
+    assert nc._published_after_ok is False
 
 
 def test_host_discovery_skips_dead_hosts_and_remembers(monkeypatch):
