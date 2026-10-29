@@ -223,6 +223,20 @@ pip install -r requirements.txt
 python pi_edge.py --tenant_id home_1_bangalore --vertical home_seniors --gateway http://YOUR_CLOUD_IP:8000
 ```
 
+### 6. Tests (no Docker, no API key, no Neo4j needed)
+```bash
+pip install ./services/common fastapi "uvicorn[standard]" python-multipart pytest
+make test        # starts a throw-away redis-server + postgres, runs the whole 6-agent pipeline in MOCK_MODE
+make smoke       # against a running stack: one hazard per vertical must raise the right alert
+```
+
+### 7. Laptop -> cloud
+The same `docker-compose.yml` runs anywhere Docker runs (VM, ECS/Compose, Azure/GCP VM). Only `.env` changes:
+`BIND_ADDR=0.0.0.0`, `AUTH_REQUIRED=true`, a long random `ADMIN_TOKEN`, new `NEO4J_PASSWORD`/`POSTGRES_PASSWORD`,
+remove `COMPOSE_PROFILES=sim`, add your `LLAMA_API_KEY`, and put TLS (Caddy / nginx / ALB) in front of ports 8000 and 3000.
+Data lives in the `neo4j_data`, `pg_data`, `redis_data` volumes - swap them for managed Postgres/Redis/Neo4j Aura by
+changing `DATABASE_URL`, `REDIS_URI`, `NEO4J_URI`. Scale any agent: `docker compose up -d --scale spark-multimodal=3`.
+
 ---
 
 ## 📡 API Endpoints
