@@ -192,9 +192,16 @@ cp .env.example .env
 
 ### 2. Run All Services
 ```bash
-docker compose up -d
+./start.sh
 docker compose logs -f spark-multimodal
 ```
+
+Stop and remove the containers and Compose network while keeping stored data:
+```bash
+./stop.sh
+```
+
+To also delete the database volumes and all stored data, run `./stop.sh --volumes`.
 
 Services:
 - Gateway: http://localhost:8000
