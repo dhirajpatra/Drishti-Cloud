@@ -4,6 +4,9 @@ import { api, type CameraInfo } from "../api";
 import { relTime, useNow, usePoll } from "../lib";
 import { Empty, Panel } from "./ui";
 
+// SAMPLE_INTERVAL_SEC can be minutes in LOW_COST_MODE (default 30 s, often 300 s), so only a long silence means a dead camera.
+const STALE_AFTER_MS = 20 * 60_000;
+
 /** Latest frame of one camera. Re-fetched every few seconds; the previous object URL is released each time. */
 function CameraTile({ tenantId, cam, now }: { tenantId: string; cam: CameraInfo; now: number }) {
   const [url, setUrl] = useState<string>();
@@ -28,7 +31,7 @@ function CameraTile({ tenantId, cam, now }: { tenantId: string; cam: CameraInfo;
   }, [tenantId, cam.camera_id]);
 
   const age = cam.updated_at ? now - new Date(cam.updated_at).getTime() : Infinity;
-  const stale = age > 5 * 60_000;
+  const stale = age > STALE_AFTER_MS;
   return (
     <figure className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--line)", background: "#05080f" }}>
       <div className="aspect-[4/3] grid place-items-center">
