@@ -129,7 +129,7 @@ def test_redirect_across_hosts_keeps_authorization(monkeypatch):
     seen = []
 
     def api(url, headers=None, params=None, timeout=None):
-        seen.append((url, (headers or {}).get("Authorization")))
+        seen.append((url, (headers or {}).get("X-API-Key")))
         req = httpx.Request("GET", url)
         if url == "https://freenewsapi.io/v1/news":
             return httpx.Response(301, request=req, headers={"location": "https://www.freenewsapi.io/v1/news"})
@@ -138,7 +138,7 @@ def test_redirect_across_hosts_keeps_authorization(monkeypatch):
     monkeypatch.setattr(nc, "HOSTS", ["https://freenewsapi.io/v1/news"])
     monkeypatch.setattr(nc.httpx, "get", api)
     assert nc.fetch_local("Delhi", national=lambda: [])[0]["headline"] == "Delhi smog"
-    assert seen[-1] == ("https://www.freenewsapi.io/v1/news", "Bearer KEY")
+    assert seen[-1] == ("https://www.freenewsapi.io/v1/news", "KEY")      # key survives the cross-host redirect
 
 
 def test_first_request_matches_documented_format(monkeypatch):
