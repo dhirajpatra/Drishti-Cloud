@@ -92,6 +92,16 @@ def test_wrong_key_gives_actionable_error(monkeypatch):
         nc.fetch_local("Delhi")
 
 
+def test_newsapi_org_rejected_key_gives_actionable_error(monkeypatch):
+    def api(url, headers=None, params=None, timeout=None):
+        req = httpx.Request("GET", url)
+        return httpx.Response(401, request=req, json={"code": "apiKeyInvalid"})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    with pytest.raises(nc.NewsAuthError, match="valid NewsAPI.org key"):
+        nc.fetch_newsapi_org("Delhi")
+
+
 def test_published_after_rejected_falls_back(monkeypatch):
     seen = []
 
