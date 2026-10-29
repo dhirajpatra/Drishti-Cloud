@@ -1,1 +1,2 @@
 # runtime dependencies come from services/common (drishti-common)
+requests

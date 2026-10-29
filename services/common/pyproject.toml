@@ -9,6 +9,7 @@ description = "Shared library for every Drishti Cloud Python service"
 requires-python = ">=3.11"
 dependencies = [
   "redis>=5.0",
+  "requests",
   "psycopg[binary,pool]>=3.2",
   "neo4j>=5.20",
   "openai>=1.40",
