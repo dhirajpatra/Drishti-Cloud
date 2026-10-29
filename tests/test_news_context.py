@@ -139,3 +139,17 @@ def test_redirect_across_hosts_keeps_authorization(monkeypatch):
     monkeypatch.setattr(nc.httpx, "get", api)
     assert nc.fetch_local("Delhi", national=lambda: [])[0]["headline"] == "Delhi smog"
     assert seen[-1] == ("https://www.freenewsapi.io/v1/news", "Bearer KEY")
+
+
+def test_first_request_matches_documented_format(monkeypatch):
+    """docs: curl "https://api.freenewsapi.io/v1/news?language=en&country=us" -H "x-api-key: YOUR_API_KEY" """
+    calls = []
+
+    def api(url, headers=None, params=None, timeout=None):
+        calls.append((url, dict(headers or {})))
+        return httpx.Response(200, request=httpx.Request("GET", url), json={"data": [row("Pune rains")]})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    nc.fetch_local("Pune", national=lambda: [])
+    assert calls[0][0] == "https://api.freenewsapi.io/v1/news" and calls[0][1] == {"X-API-Key": "KEY"}
+    assert len(calls) == 1                                                    # worked first time: no probing

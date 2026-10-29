@@ -25,7 +25,7 @@ log = get_logger("news-context")
 
 PROVIDER = os.getenv("NEWS_PROVIDER", "freenewsapi").strip().lower()
 API_URL = os.getenv("NEWS_API_URL", "").strip()          # empty = auto: try the hosts below and remember the first that answers
-HOSTS = ["https://freenewsapi.io/v1/news", "https://www.freenewsapi.io/v1/news", "https://api.freenewsapi.io/v1/news"]
+HOSTS = ["https://api.freenewsapi.io/v1/news", "https://freenewsapi.io/v1/news", "https://www.freenewsapi.io/v1/news"]  # 1st = per the docs
 AUTH = os.getenv("NEWS_AUTH", "auto").strip()            # auto | bearer | x-api-key | query:<param name>
 COUNTRY = os.getenv("NEWS_COUNTRY", "IN").strip()
 LANGUAGE = os.getenv("NEWS_LANGUAGE", "en").strip()
@@ -40,7 +40,7 @@ ALIASES = {
     "gurugram": ["Gurugram", "Gurgaon"], "gurgaon": ["Gurugram", "Gurgaon"],
     "delhi": ["Delhi", "New Delhi"], "new delhi": ["New Delhi", "Delhi"],
 }
-AUTH_ORDER = ["bearer", "x-api-key", "query:api_key", "query:apikey", "query:key"]
+AUTH_ORDER = ["x-api-key", "bearer", "query:api_key", "query:apikey", "query:key"]   # 1st = per the docs (-H "x-api-key: KEY")
 
 _auth_ok: str | None = None            # auth scheme that worked, remembered for the process lifetime
 _host_ok: str | None = None            # endpoint that worked
