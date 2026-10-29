@@ -109,15 +109,20 @@ def main() -> None:
 
     with httpx.Client(timeout=30) as c:
         warned_mode = False
+        blocked = False
 
         def tick() -> None:
-            nonlocal warned_mode
+            nonlocal warned_mode, blocked
             if not warned_mode:
                 mode = c.get(f"{GATEWAY}/health").json()
-                if not mode.get("mock_mode"):
-                    log.warning("gateway is NOT in MOCK_MODE: synthetic frames will be sent to the real models "
-                                "and _sim hints are ignored. Disable this service or set MOCK_MODE=true.")
+                if not mode.get("mock_mode") and os.environ.get("SIM_ALLOW_LIVE", "").lower() not in ("1", "true", "yes"):
+                    blocked = True
+                    log.error("gateway is using the REAL models (MOCK_MODE=false): the simulator is paused so synthetic "
+                              "frames do not burn API quota. Remove COMPOSE_PROFILES=sim from .env (or set SIM_ALLOW_LIVE=true "
+                              "to send them anyway).")
                 warned_mode = True
+            if blocked:
+                return
             for t in TENANTS:
                 if t not in verticals:
                     r = c.get(f"{GATEWAY}/tenants/{t}", headers=headers())
