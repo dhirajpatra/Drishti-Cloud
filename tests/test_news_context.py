@@ -153,3 +153,29 @@ def test_first_request_matches_documented_format(monkeypatch):
     nc.fetch_local("Pune", national=lambda: [])
     assert calls[0][0] == "https://api.freenewsapi.io/v1/news" and calls[0][1] == {"X-API-Key": "KEY"}
     assert len(calls) == 1                                                    # worked first time: no probing
+
+
+def test_server_error_with_published_after_retries_without_it(monkeypatch):
+    seen = []
+
+    def api(url, headers=None, params=None, timeout=None):
+        seen.append(dict(params))
+        req = httpx.Request("GET", url)
+        if "published_after" in params:
+            return httpx.Response(500, request=req, text="boom")
+        return httpx.Response(200, request=req, json={"data": [row("Delhi smog")]})
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    assert nc.fetch_local("Delhi", national=lambda: [])[0]["headline"] == "Delhi smog"
+    assert nc._published_after_ok is False
+    assert "published_after" not in seen[-1]
+
+
+def test_outage_does_not_switch_the_filter_off(monkeypatch):
+    def api(url, headers=None, params=None, timeout=None):
+        return httpx.Response(500, request=httpx.Request("GET", url), text="down")
+
+    monkeypatch.setattr(nc.httpx, "get", api)
+    with pytest.raises(httpx.HTTPStatusError):
+        nc.fetch_local("Delhi", national=lambda: [])
+    assert nc._published_after_ok is True          # a real outage must not permanently disable the filter
