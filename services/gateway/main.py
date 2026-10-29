@@ -272,6 +272,18 @@ def tenant_events(tenant_id: str, request: Request, limit: int = 50):
     return _iso(db.list_events(tenant_id, max(1, min(limit, 200))), "created_at")
 
 
+@app.get("/tenants/{tenant_id}/events/{frame_id}/image")
+def event_image(tenant_id: str, frame_id: str, request: Request):
+    """Picture behind an event: the snapshot kept for EVENT_IMAGE_TTL_SEC, else the alert's stored proof."""
+    require_tenant(tenant_id, request)
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", frame_id):
+        raise HTTPException(422, "bad frame id")
+    img = bus.get_snapshot(tenant_id, frame_id) or db.get_alert_image_by_frame(tenant_id, frame_id)
+    if img is None:
+        raise HTTPException(404, "no picture kept for this event (expired or never stored)")
+    return Response(img, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
 @app.get("/tenants/{tenant_id}/actuations")
 def tenant_actuations(tenant_id: str, request: Request, limit: int = 30):
     require_tenant(tenant_id, request)
