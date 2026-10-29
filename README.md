@@ -309,8 +309,7 @@ Clean up one tenant's events (keeps habits, cameras and people): `MATCH (e:Event
 Same queries without a browser: `docker compose exec neo4j cypher-shell -u neo4j -p drishti123 "MATCH (n) RETURN labels(n)[0], count(*)"`.
 A harmless `IN_CONTEXT ... not available` warning in the gateway log just means no news items have been stored yet.
 
-**Local news:** `news-context` reads each tenant's `location` (where its cameras are), fetches the newest headlines that
-mention that city (freenewsapi.io; "Bengaluru" also searches "Bangalore"), keeps the top 5 (`NEWS_MAX_ITEMS`) from the last
+**Local news:** `news-context` reads each tenant's `location` (where its cameras are), scans the newest national headlines (`NEWS_SCAN_PAGES` pages, since freenewsapi's title search currently errors) for that city (freenewsapi.io; "Bengaluru" also searches "Bangalore"), keeps the top 5 (`NEWS_MAX_ITEMS`) from the last
 48 h, and fills gaps with the country's top headlines marked `(national)`. Check it with query 9 above, or
 `docker compose logs news-context --tail=20` (look for `news for home_1_bangalore (Bengaluru): 5 item(s)`). The Wonder
 agent escalates an ALERT to CRITICAL when a headline matches that rule's hazard words (e.g. bomb, riot, flood). If using

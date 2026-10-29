@@ -2,8 +2,11 @@
 ground decisions (power cuts, protests, threats).
 
 Local news = news about the place the tenant's cameras are in (tenant `location`, e.g. "Bengaluru"):
-  1. headlines whose TITLE mentions the city (and its other common names, Bengaluru/Bangalore ...), newest first;
-  2. if fewer than NEWS_MAX_ITEMS, the gap is filled with the country's top headlines (NEWS_COUNTRY).
+  1. the country's newest headlines are fetched page by page (NEWS_SCAN_PAGES, once per refresh for ALL tenants) and the
+     ones whose title mentions the city or its other common names (Bengaluru/Bangalore ...) are picked locally -
+     freenewsapi's own title search (`in_title`) returns HTTP 500 and `q` was removed, so the server cannot do this;
+  2. if still short, `in_title` is tried once (skipped for 6 h after a failure);
+  3. any remaining gap is filled with the country's top headlines (NEWS_COUNTRY).
 Only the newest NEWS_MAX_ITEMS (default 5) per tenant are kept, and nothing older than NEWS_MAX_AGE_HOURS.
 
 Providers (NEWS_PROVIDER):  freenewsapi (default, GET <NEWS_API_URL>?language=..&country=..&in_title=..)  |  newsapi (newsapi.org)
@@ -13,6 +16,8 @@ from __future__ import annotations
 
 import functools
 import os
+import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -32,6 +37,7 @@ LANGUAGE = os.getenv("NEWS_LANGUAGE", "en").strip()
 ORDER_BY = os.getenv("NEWS_ORDER_BY", "").strip()        # provider specific; empty = provider default
 MAX_ITEMS = max(1, int(os.getenv("NEWS_MAX_ITEMS", "5")))
 MAX_AGE_H = max(1, int(os.getenv("NEWS_MAX_AGE_HOURS", "48")))
+SCAN_PAGES = max(1, int(os.getenv("NEWS_SCAN_PAGES", "5")))   # pages (10 headlines each) scanned for city mentions
 
 # Other names a city is reported under, so "Bengaluru" also finds "Bangalore" headlines.
 ALIASES = {
@@ -44,6 +50,7 @@ AUTH_ORDER = ["x-api-key", "bearer", "query:api_key", "query:apikey", "query:key
 
 _auth_ok: str | None = None            # auth scheme that worked, remembered for the process lifetime
 _host_ok: str | None = None            # endpoint that worked
+_in_title_retry_at = 0.0               # epoch seconds: skip the (currently broken) in_title search until then
 _published_after_ok = True             # flips off if the API rejects the published_after filter
 
 
@@ -126,27 +133,30 @@ def _request(params: dict) -> dict:
                         "dashboard shows.")
 
 
-def _free_query(extra: dict) -> list[dict]:
-    """One search. `published_after` has no documented format, so if the API chokes on it (400/422/5xx) the same
-    query is retried without it - and only if THAT works is the filter switched off (age is then checked locally)."""
+def _search(extra: dict) -> tuple[list[dict], dict]:
+    """One /v1/news call -> (rows, meta). `published_after` has no documented format, so if the API chokes on it
+    (400/422/5xx) the same query is retried without it - and only if THAT works is the filter switched off
+    (age is then checked locally)."""
     global _published_after_ok
     params = {"language": LANGUAGE, "country": COUNTRY, **extra}
     if ORDER_BY:
         params["order_by"] = ORDER_BY
-    if not _published_after_ok:
-        return _request(params).get("data") or []
-    after = (datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_H)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    try:
-        return _request({**params, "published_after": after}).get("data") or []
-    except httpx.HTTPStatusError as exc:
-        code = exc.response.status_code
-        if code not in (400, 422) and code < 500:
-            raise
-        log.warning("news API answered HTTP %s to a query with published_after - retrying without it", code)
-        data = _request(params)                      # still failing -> raises, filter stays on
-        _published_after_ok = False
-        log.warning("published_after is not usable with this API - filtering by age locally from now on")
-        return data.get("data") or []
+    if _published_after_ok:
+        after = (datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_H)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            data = _request({**params, "published_after": after})
+            return data.get("data") or [], data.get("meta") or {}
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code
+            if code not in (400, 422) and code < 500:
+                raise
+            log.warning("news API answered HTTP %s to a query with published_after - retrying without it", code)
+            data = _request(params)                  # still failing -> raises, filter stays on
+            _published_after_ok = False
+            log.warning("published_after is not usable with this API - filtering by age locally from now on")
+            return data.get("data") or [], data.get("meta") or {}
+    data = _request(params)
+    return data.get("data") or [], data.get("meta") or {}
 
 
 def normalise(items: list[dict], now: datetime | None = None) -> list[dict]:
@@ -167,20 +177,57 @@ def normalise(items: list[dict], now: datetime | None = None) -> list[dict]:
 
 
 # ----------------------------------------------------------------------------------------------- providers
-def fetch_national() -> list[dict]:
-    return normalise(_free_query({}))
-
-
-def fetch_local(location: str, national=fetch_national) -> list[dict]:
-    """Top MAX_ITEMS headlines for a location (freenewsapi): city mentions first, then country top headlines.
-    `national` is a callable returning the country's top headlines (memoised per tick by the caller)."""
+def scan_country(pages: int | None = None) -> list[dict]:
+    """The country's newest headlines, `pages` x 10 of them, newest first (one API call per page)."""
+    pages = pages or SCAN_PAGES
     rows: list[dict] = []
-    for name in city_names(location):
-        rows += _free_query({"in_title": name})
-    items = normalise(rows)[:MAX_ITEMS]
+    offset = 0
+    for i in range(pages):
+        try:
+            data, meta = _search({"offset": offset} if offset else {})
+        except httpx.HTTPStatusError as exc:
+            if i == 0:
+                raise
+            log.warning("paging stopped at page %d: HTTP %s (the API may not accept offset)", i + 1, exc.response.status_code)
+            break
+        rows += data
+        nxt = meta.get("next_offset")
+        if not data or not meta.get("has_more") or nxt is None or nxt == offset:
+            break
+        offset = nxt
+    return normalise(rows)
+
+
+def mentions(title: str, names: list[str]) -> bool:
+    return any(re.search(rf"\b{re.escape(n)}\b", title, re.I) for n in names)
+
+
+def fetch_local(location: str, scan=scan_country) -> list[dict]:
+    """Top MAX_ITEMS headlines for a location (freenewsapi): city mentions first, then country top headlines.
+    `scan` returns the country's newest headlines (memoised per refresh by the caller, shared by all tenants)."""
+    global _in_title_retry_at
+    names = city_names(location)
+    pool = scan()
+    items = [n for n in pool if mentions(n["headline"], names)][:MAX_ITEMS]
+
+    if len(items) < MAX_ITEMS and names and time.time() >= _in_title_retry_at:
+        try:                                                    # server-side title search, when the API lets us
+            rows: list[dict] = []
+            for name in names:
+                rows += _search({"in_title": name})[0]
+            have = {n["headline"].lower() for n in items}
+            items += [n for n in normalise(rows) if n["headline"].lower() not in have]
+            items = sorted(items, key=lambda n: n["ts"], reverse=True)[:MAX_ITEMS]
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 422) and exc.response.status_code < 500:
+                raise
+            _in_title_retry_at = time.time() + 6 * 3600
+            log.warning("news API in_title search failed (HTTP %s) - city matching is done locally; retry in 6 h",
+                        exc.response.status_code)
+
     if len(items) < MAX_ITEMS:
         have = {n["headline"].lower() for n in items}
-        for n in national():
+        for n in pool:
             if len(items) >= MAX_ITEMS:
                 break
             if n["headline"].lower() not in have:
@@ -213,7 +260,7 @@ def tick() -> None:
         log.info("no NEWS_API_KEY - news context disabled")
         return
     cache: dict[str, list[dict]] = {}
-    national = functools.lru_cache(maxsize=1)(fetch_national)      # one country-level call per refresh
+    scan = functools.lru_cache(maxsize=1)(scan_country)            # one set of country-level calls per refresh
     for t in db.all_tenants():
         loc = (t.get("location") or "").strip()
         if not loc:
@@ -226,7 +273,7 @@ def tick() -> None:
                 elif PROVIDER == "newsapi":
                     cache[loc] = fetch_newsapi_org(loc)
                 else:
-                    cache[loc] = fetch_local(loc, national)
+                    cache[loc] = fetch_local(loc, scan)
                 log.info("news for %s (%s): %d item(s)", t["id"], loc, len(cache[loc]))
             for n in cache[loc]:
                 graph.add_news(t["id"], n["headline"], n["source"], n.get("url"), n["ts"])
