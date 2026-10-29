@@ -112,6 +112,8 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+export interface CameraInfo { camera_id: string; updated_at: string | null }
+
 export const api = {
   health: () => json<Health>("/health"),
   verticals: () => json<Vertical[]>("/verticals"),
@@ -127,6 +129,11 @@ export const api = {
     json<{ ok: true }>(`/alerts/${encodeURIComponent(alertId)}/ack`, jsonInit("POST", { false_alarm: falseAlarm })),
   alertImageBlob: async (alertId: string): Promise<Blob> => {
     const res = await raw(`/alerts/${encodeURIComponent(alertId)}/image`);
+    return res.blob();
+  },
+  cameras: (id: string) => json<CameraInfo[]>(`/tenants/${encodeURIComponent(id)}/cameras`),
+  cameraFrameBlob: async (id: string, cam: string): Promise<Blob> => {
+    const res = await raw(`/tenants/${encodeURIComponent(id)}/cameras/${encodeURIComponent(cam)}/latest`);
     return res.blob();
   },
   ingest: (tenantId: string, file: File, sensors: string, cameraId: string, force: boolean) => {
