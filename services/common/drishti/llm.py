@@ -150,24 +150,53 @@ def _usage(data: dict):
     return types.SimpleNamespace(prompt_tokens=u.get("input_tokens", 0), completion_tokens=u.get("output_tokens", 0))
 
 
+def is_thinking_model(model: str) -> bool:
+    """muse-* models think before answering and, unless told otherwise, default to effort 'high'."""
+    return model.lower().startswith("muse")
+
+
+def thinking_effort(model: str, reasoning: bool) -> str | None:
+    """Effort sent with the request. reasoning=False is the FAST path (short extraction/classification calls):
+    still sent explicitly ('minimal'), because omitting the field would give the model's expensive default."""
+    if not is_thinking_model(model):
+        return None
+    name, default = ("REASONING_EFFORT", "low") if reasoning else ("REASONING_EFFORT_FAST", "minimal")
+    value = os.getenv(name, default).strip().lower()
+    return None if value in ("", "default") else value
+
+
+def thinking_headroom(model: str, reasoning: bool) -> int:
+    """Extra output tokens on top of the answer budget, for the model's own thinking."""
+    if not is_thinking_model(model):
+        return 0
+    return int(os.getenv("REASONING_HEADROOM_TOKENS", "512")) if reasoning else int(os.getenv("FAST_HEADROOM_TOKENS", "256"))
+
+
 def _responses_call(model: str, messages: list[dict], max_tokens: int, reasoning: bool, r: redis.Redis) -> dict:
-    """One POST to /v1/responses. Reasoning models (muse-*) spend output tokens on thinking, so they get headroom."""
+    """One POST to /v1/responses (counts against the daily call budget)."""
     url = settings.llama_api_url.rstrip("/")
     if not url.endswith("/responses"):
         url += "/responses"
     headers = {"Authorization": f"Bearer {settings.llama_api_key}", "Content-Type": "application/json"}
     payload: dict = {"model": model, "input": to_responses_input(messages), "max_output_tokens": max_tokens}
-    effort = os.getenv("REASONING_EFFORT", "low").strip().lower()
-    if reasoning and effort and effort != "default":
+    effort = thinking_effort(model, reasoning)
+    if effort:
         payload["reasoning"] = {"effort": effort}
+
     def send() -> requests.Response:
         _reserve_call(r)
         return requests.post(url, headers=headers, json=payload, timeout=90)
 
     resp = send()
-    if resp.status_code == 400 and "reasoning" in payload and "reasoning" in resp.text.lower():
-        log.warning("model %s rejected reasoning.effort=%s - retrying without it", model, effort)
-        payload.pop("reasoning")
+    fallbacks = [e for e in ("low",) if e != effort]
+    while resp.status_code == 400 and "reasoning" in payload and any(w in resp.text.lower() for w in ("reasoning", "effort")):
+        if fallbacks:                                   # e.g. 'minimal' not accepted -> try 'low', then drop the field
+            nxt = fallbacks.pop(0)
+            log.warning("model %s rejected reasoning.effort=%s - retrying with %s", model, payload["reasoning"]["effort"], nxt)
+            payload["reasoning"] = {"effort": nxt}
+        else:
+            log.warning("model %s rejected reasoning.effort - retrying without it", model)
+            payload.pop("reasoning")
         resp = send()
     if resp.status_code != 200:
         log.error("Meta API Error %s: %s", resp.status_code, resp.text[:500])
@@ -181,8 +210,7 @@ def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700,
         raise RuntimeError("LLAMA_API_URL must point to the Meta Responses API")
     r = r or redis_client()
 
-    headroom = int(os.getenv("REASONING_HEADROOM_TOKENS", "512")) if reasoning else 0
-    budget = max_tokens + headroom
+    budget = max_tokens + thinking_headroom(model, reasoning)
     data = _responses_call(model, messages, budget, reasoning, r)
     text = extract_response_text(data)
     reason = (data.get("incomplete_details") or {}).get("reason")
