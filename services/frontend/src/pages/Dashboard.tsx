@@ -43,9 +43,9 @@ export default function Dashboard() {
   const verticalLabels = useMemo(() => Object.fromEntries((verticals.data ?? []).map((v) => [v.id, v.label])), [verticals.data]);
   const llmTotal = useMemo(() => {
     if (!usage.data) return undefined;
-    return Object.values(usage.data.models).reduce((s, per) => s + Object.values(per).reduce((a, b) => a + b, 0), 0);
+    return Object.values(usage.data.models).reduce((s, per) => s + (per.calls ?? 0), 0);
   }, [usage.data]);
-  const llmSub = usage.data ? Object.entries(usage.data.models).map(([m, per]) => `${m}:${Object.values(per).reduce((a, b) => a + b, 0)}`).join(" ") : undefined;
+  const llmSub = usage.data ? Object.entries(usage.data.models).map(([m, per]) => `${m}:${per.calls ?? 0}`).join(" ") : undefined;
 
   const vColor = vid ? verticalColor(vid) : "var(--accent)";
 
