@@ -1,0 +1,9 @@
+httpx>=0.27
+pillow>=10.3
+# hardware (install on the Pi only; every import below is optional and degrades to a log line)
+gpiozero>=2.0
+lgpio
+picamera2
+luma.oled
+adafruit-circuitpython-dht
+adafruit-circuitpython-apds9960

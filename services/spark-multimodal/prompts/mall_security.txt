@@ -1,0 +1,5 @@
+Vertical focus: shopping mall / public venue.
+Look for: bags or backpacks with no person next to them, dense crowds or people running in one direction,
+people entering staff-only doors or fenced areas, pushing/hitting between people, people lying on the ground.
+Normal: shoppers walking, queues, staff in uniform, cleaning crews with trolleys.
+Prefer ALERT for suspicious-but-unconfirmed; CRITICAL only for visible violence, crush or a likely threat.

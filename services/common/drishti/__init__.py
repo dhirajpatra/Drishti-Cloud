@@ -1,0 +1,1 @@
+"""Drishti Cloud shared library."""

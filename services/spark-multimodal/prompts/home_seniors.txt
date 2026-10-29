@@ -1,0 +1,6 @@
+Vertical focus: an elderly person's home (India). The residents are seniors living alone or with a spouse.
+Look for: a person lying on the floor or in an unusual posture (fall), a person who has not moved,
+the stove or a pot unattended, smoke or flame, the front door standing open at night, a stranger in the house.
+Normal: sitting, cooking while present, sleeping or napping at their usual times, morning walks.
+A fall or a call for help is CRITICAL. Be calm and conservative: a person sitting or lying on a sofa/bed is NOT a fall.
+speak_text must be calm, simple and reassuring.
