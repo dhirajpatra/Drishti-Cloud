@@ -1,11 +1,12 @@
 # services/common/drishti/llm.py
-"""【entity-Meta¦canonical_name=Meta】 Model API client - supports both old /compat/v1 and new /v1/responses"""
+"""Meta Model API client - supports the new api.meta.ai /v1/responses endpoint and the old OpenAI-compatible /compat/v1."""
 
 from __future__ import annotations
 
 import base64
 import json
 import re
+import types
 from datetime import date
 from typing import Any
 
@@ -28,15 +29,57 @@ def client() -> OpenAI:
         _client = OpenAI(base_url=settings.llama_api_url, api_key=settings.llama_api_key, timeout=60, max_retries=2)
     return _client
 
+def is_responses_api() -> bool:
+    """True when LLAMA_API_URL points at the new api.meta.ai Responses endpoint."""
+    return "api.meta.ai" in (settings.llama_api_url or "")
+
+
 def image_part(jpeg: bytes) -> dict:
     b64 = base64.b64encode(jpeg).decode()
-    # Check which API we're using
-    if "api.【entity-meta.ai¦canonical_name=Meta】" in settings.llama_api_url:
-        # New API: input_image format
-        return {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64}"}
-    else:
-        # Old API: image_url format
-        return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+    url = f"data:image/jpeg;base64,{b64}"
+    if is_responses_api():
+        return {"type": "input_image", "image_url": url}          # Responses API
+    return {"type": "image_url", "image_url": {"url": url}}        # old compat/v1
+
+
+def to_responses_input(messages: list[dict]) -> list[dict]:
+    """Convert chat-style messages (text / image_url parts) to Responses API input parts."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            text_type = "output_text" if m.get("role") == "assistant" else "input_text"
+            parts = []
+            for part in content:
+                t = part.get("type")
+                if t == "text":
+                    parts.append({"type": text_type, "text": part.get("text", "")})
+                elif t == "image_url":
+                    iu = part.get("image_url")
+                    parts.append({"type": "input_image", "image_url": iu.get("url") if isinstance(iu, dict) else iu})
+                else:                                               # already input_text / input_image
+                    parts.append(part)
+            content = parts
+        out.append({"role": m.get("role", "user"), "content": content})
+    return out
+
+
+def extract_response_text(data: dict) -> str:
+    """Pull the assistant text out of a Responses API reply (skips reasoning items)."""
+    if isinstance(data.get("output_text"), str) and data["output_text"].strip():
+        return data["output_text"]
+    chunks = []
+    for item in data.get("output") or []:
+        if item.get("type", "message") != "message":
+            continue
+        c = item.get("content")
+        if isinstance(c, str):
+            chunks.append(c)
+        for part in c or []:
+            if isinstance(part, dict) and part.get("type") in ("output_text", "text") and part.get("text"):
+                chunks.append(part["text"])
+    return "".join(chunks)
+
 
 def _today_key() -> str:
     return f"usage:calls:{date.today().isoformat()}"
@@ -77,45 +120,27 @@ def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700, temper
               r: redis.Redis | None = None) -> dict:
     r = r or redis_client()
     
-    # NEW API: https://api.meta.ai/v1/responses - use requests directly
-    if "api.meta.ai" in settings.llama_api_url:
-        api_key = settings.llama_api_key
-        url = settings.llama_api_url.rstrip("/")  # https://api.meta.ai/v1/responses
+    # NEW API: https://api.meta.ai/v1/responses
+    if is_responses_api():
+        url = settings.llama_api_url.rstrip("/")
         if not url.endswith("/responses"):
-            url = url + "/responses" if url.endswith("/v1") else url
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "input": messages,
-            "max_output_tokens": max_tokens
-        }
-        
+            url += "/responses"
+        headers = {"Authorization": f"Bearer {settings.llama_api_key}", "Content-Type": "application/json"}
+        payload = {"model": model, "input": to_responses_input(messages), "max_output_tokens": max_tokens}
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
         if resp.status_code != 200:
-            print(f"Meta API Error {resp.status_code}: {resp.text}")
-            log.error(f"Meta API Error {resp.status_code}: {resp.text}")
+            log.error("Meta API Error %s: %s", resp.status_code, resp.text[:500])
             resp.raise_for_status()
         data = resp.json()
-        
-        # New API format: output[0].content[0].text contains JSON
-        try:
-            text = data["output"][0]["content"][0]["text"]
-            # Record usage if available
-            usage = data.get("usage")
-            if usage:
-                _record(model, type('obj', (object,), {'prompt_tokens': usage.get('input_tokens',0), 'completion_tokens': usage.get('output_tokens',0)})(), r)
-            else:
-                _record(model, None, r)
-            return parse_json(text)
-        except Exception as e:
-            log.error(f"Failed to parse new API response: {data}")
-            raise
-    
+        text = extract_response_text(data)
+        if not text:
+            log.error("Meta API returned no text: %s", str(data)[:500])
+            raise ValueError("Meta API response contained no output text")
+        usage = data.get("usage") or {}
+        _record(model, types.SimpleNamespace(prompt_tokens=usage.get("input_tokens", 0),
+                                             completion_tokens=usage.get("output_tokens", 0)), r)
+        return parse_json(text)
+
     # OLD API: compat/v1 - use OpenAI client
     resp = client().chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
     _record(model, getattr(resp, "usage", None), r)
