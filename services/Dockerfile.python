@@ -2,7 +2,7 @@
 # Build context is ./services ; pick the service with --build-arg SERVICE=<dir>.
 FROM python:3.12-slim
 
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONPATH=/opt/common
 
 ARG SERVICE
 ARG SYSTEM_PACKAGES=""
@@ -13,7 +13,7 @@ RUN if [ -n "$SYSTEM_PACKAGES" ]; then \
 
 WORKDIR /app
 COPY common /opt/common
-RUN pip install /opt/common
+RUN pip install -r /opt/common/requirements.txt
 
 COPY ${SERVICE}/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
