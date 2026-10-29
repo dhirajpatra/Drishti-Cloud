@@ -1,4 +1,5 @@
 """Meta Responses API request/response shaping (no network)."""
+import copy
 from drishti import llm
 from drishti.config import settings
 
@@ -112,3 +113,65 @@ def test_call_budget_is_reserved_atomically(monkeypatch):
         pass
     else:
         raise AssertionError("call budget should reject requests at the cap")
+
+
+def _capture(monkeypatch, replies):
+    """Fake requests.post: records payloads, answers from `replies` (status, body) in order."""
+    sent = []
+    monkeypatch.setattr(llm, "_reserve_call", lambda r: None)
+    monkeypatch.setattr(settings, "llama_api_url", "https://api.meta.ai/v1/responses")
+
+    class Resp:
+        def __init__(self, status, body):
+            self.status_code, self._b, self.text = status, body, str(body)
+
+        def json(self):
+            return self._b
+
+        def raise_for_status(self):
+            raise RuntimeError(self.status_code)
+
+    def post(url, headers=None, json=None, timeout=None):
+        sent.append(copy.deepcopy(json))
+        return Resp(*replies[min(len(sent) - 1, len(replies) - 1)])
+
+    monkeypatch.setattr(llm.requests, "post", post)
+    return sent
+
+
+OK = (200, {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}]})
+
+
+def test_fast_call_on_muse_model_pins_minimal_effort_with_small_headroom(monkeypatch):
+    for k in ("REASONING_EFFORT", "REASONING_EFFORT_FAST", "FAST_HEADROOM_TOKENS", "REASONING_HEADROOM_TOKENS"):
+        monkeypatch.delenv(k, raising=False)
+    sent = _capture(monkeypatch, [OK])
+    monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
+    llm.chat_json("muse-spark-1.3", [], max_tokens=350, r=object(), reasoning=False)
+    assert sent[0]["reasoning"] == {"effort": "minimal"}          # NOT omitted (that would mean the default, 'high')
+    assert sent[0]["max_output_tokens"] == 350 + 256
+
+
+def test_decision_call_uses_low_effort_and_bigger_headroom(monkeypatch):
+    for k in ("REASONING_EFFORT", "REASONING_HEADROOM_TOKENS"):
+        monkeypatch.delenv(k, raising=False)
+    sent = _capture(monkeypatch, [OK])
+    monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
+    llm.chat_json("muse-wonder-1.0", [], max_tokens=250, r=object())
+    assert sent[0]["reasoning"] == {"effort": "low"} and sent[0]["max_output_tokens"] == 250 + 512
+
+
+def test_segmentation_model_gets_no_thinking_controls(monkeypatch):
+    sent = _capture(monkeypatch, [OK])
+    monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
+    llm.chat_json("sam-3.1", [], max_tokens=900, r=object(), reasoning=False)
+    assert "reasoning" not in sent[0] and sent[0]["max_output_tokens"] == 900
+
+
+def test_rejected_effort_steps_down_then_drops(monkeypatch):
+    monkeypatch.delenv("REASONING_EFFORT_FAST", raising=False)
+    bad = (400, {"error": "unsupported value for reasoning.effort"})
+    sent = _capture(monkeypatch, [bad, bad, OK])
+    monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
+    llm.chat_json("muse-spark-1.3", [], max_tokens=100, r=object(), reasoning=False)
+    assert [p.get("reasoning") for p in sent] == [{"effort": "minimal"}, {"effort": "low"}, None]
