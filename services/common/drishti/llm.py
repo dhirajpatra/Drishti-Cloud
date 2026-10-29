@@ -29,6 +29,10 @@ def client() -> OpenAI:
         _client = OpenAI(base_url=settings.llama_api_url, api_key=settings.llama_api_key, timeout=60, max_retries=2)
     return _client
 
+class NoOutputText(ValueError):
+    """The model answered 200 but with no text (e.g. a segmentation model returning masks)."""
+
+
 def is_responses_api() -> bool:
     """True when LLAMA_API_URL points at the new api.meta.ai Responses endpoint."""
     return "api.meta.ai" in (settings.llama_api_url or "")
@@ -65,20 +69,37 @@ def to_responses_input(messages: list[dict]) -> list[dict]:
 
 
 def extract_response_text(data: dict) -> str:
-    """Pull the assistant text out of a Responses API reply (skips reasoning items)."""
+    """Pull the assistant text out of a Responses API reply (skips reasoning items).
+
+    Tolerant: any content part carrying a string `text` counts, whatever its `type`.
+    """
     if isinstance(data.get("output_text"), str) and data["output_text"].strip():
         return data["output_text"]
     chunks = []
     for item in data.get("output") or []:
-        if item.get("type", "message") != "message":
+        if not isinstance(item, dict) or item.get("type", "message") in ("reasoning", "function_call"):
             continue
         c = item.get("content")
         if isinstance(c, str):
             chunks.append(c)
-        for part in c or []:
-            if isinstance(part, dict) and part.get("type") in ("output_text", "text") and part.get("text"):
+        for part in c if isinstance(c, list) else []:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
                 chunks.append(part["text"])
-    return "".join(chunks)
+    return "".join(chunks).strip()
+
+
+def describe_shape(obj: Any, limit: int = 3000, _depth: int = 0) -> str:
+    """Compact structural dump of an API reply for logs (long strings and base64 are clipped)."""
+    if isinstance(obj, dict):
+        body = ", ".join(f"{k}: {describe_shape(v, limit, _depth + 1)}" for k, v in obj.items())
+        out = "{" + body + "}"
+    elif isinstance(obj, list):
+        out = "[" + ", ".join(describe_shape(v, limit, _depth + 1) for v in obj[:8]) + (", ..." if len(obj) > 8 else "") + "]"
+    elif isinstance(obj, str):
+        out = repr(obj[:160] + ("..." if len(obj) > 160 else ""))
+    else:
+        out = repr(obj)
+    return out[:limit] if _depth == 0 else out
 
 
 def _today_key() -> str:
@@ -134,8 +155,8 @@ def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700, temper
         data = resp.json()
         text = extract_response_text(data)
         if not text:
-            log.error("Meta API returned no text: %s", str(data)[:500])
-            raise ValueError("Meta API response contained no output text")
+            log.error("Meta API returned no text (model=%s) shape: %s", model, describe_shape(data))
+            raise NoOutputText(f"{model} returned no output text")
         usage = data.get("usage") or {}
         _record(model, types.SimpleNamespace(prompt_tokens=usage.get("input_tokens", 0),
                                              completion_tokens=usage.get("output_tokens", 0)), r)
