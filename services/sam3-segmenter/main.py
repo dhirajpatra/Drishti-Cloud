@@ -57,8 +57,15 @@ def sam_segment(jpeg: bytes, vertical: str, r) -> list[dict]:
         'Return JSON only: {"objects":[{"label":"<name>","bbox":[x1,y1,x2,y2],"confidence":0.0-1.0}]} '
         "with bbox as fractions of image width/height (0-1)."
     )
-    out = llm.chat_json(settings.sam_model, [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}],
-                        max_tokens=900, r=r)
+    msgs = [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}]
+    try:
+        out = llm.chat_json(settings.sam_model, msgs, max_tokens=900, r=r)
+    except (llm.NoOutputText, ValueError) as e:
+        # SAM answered but not with parseable JSON text: fall back to the Spark vision model so the pipeline keeps flowing.
+        if settings.spark_model == settings.sam_model:
+            raise
+        log.warning("%s gave no usable JSON (%s) - falling back to %s", settings.sam_model, e, settings.spark_model)
+        out = llm.chat_json(settings.spark_model, msgs, max_tokens=900, r=r)
     return clean(out.get("objects"))
 
 

@@ -26,3 +26,29 @@ def test_extract_text_skips_reasoning_item():
                        {"type": "message", "content": [{"type": "output_text", "text": '{"a": 1}'}]}]}
     assert llm.parse_json(llm.extract_response_text(data)) == {"a": 1}
     assert llm.extract_response_text({"output_text": "{}"}) == "{}"
+
+
+def test_extract_text_any_part_type_and_shape_dump():
+    data = {"output": [{"type": "message", "content": [{"type": "weird_part", "text": '{"objects": []}'}]}]}
+    assert llm.extract_response_text(data) == '{"objects": []}'
+    empty = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "", "annotations": []}]}]}
+    assert llm.extract_response_text(empty) == ""
+    assert "annotations" in llm.describe_shape(empty)
+
+
+def test_sam_falls_back_to_spark_when_no_text(monkeypatch):
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location("sam_agent", pathlib.Path(__file__).parents[1] / "services/sam3-segmenter/main.py")
+    sam = importlib.util.module_from_spec(spec); spec.loader.exec_module(sam)
+    calls = []
+
+    def fake(model, msgs, **kw):
+        calls.append(model)
+        if model == settings.sam_model:
+            raise llm.NoOutputText("empty")
+        return {"objects": [{"label": "bag", "bbox": [0.1, 0.1, 0.4, 0.4]}]}
+
+    monkeypatch.setattr(sam.llm, "chat_json", fake)
+    monkeypatch.setattr(settings, "sam_model", "sam-3.1"); monkeypatch.setattr(settings, "spark_model", "muse-spark-1.3")
+    out = sam.sam_segment(b"x", "mall_security", None)
+    assert calls == ["sam-3.1", "muse-spark-1.3"] and out[0]["label"] == "bag"
