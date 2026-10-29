@@ -13,7 +13,12 @@ RUN if [ -n "$SYSTEM_PACKAGES" ]; then \
 
 WORKDIR /app
 COPY common /opt/common
-RUN pip install -r /opt/common/requirements.txt
+# The feed ingestor does not use the API/database clients required by other services.
+RUN if [ "$SERVICE" = "feed-ingestor" ]; then \
+      pip install -r /opt/common/requirements-feed-ingestor.txt; \
+    else \
+      pip install -r /opt/common/requirements.txt; \
+    fi
 
 COPY ${SERVICE}/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt

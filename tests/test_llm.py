@@ -7,7 +7,7 @@ def test_image_part_matches_endpoint(monkeypatch):
     monkeypatch.setattr(settings, "llama_api_url", "https://api.meta.ai/v1/responses")
     assert llm.image_part(b"x")["type"] == "input_image"
     monkeypatch.setattr(settings, "llama_api_url", "https://api.llama.com/compat/v1/")
-    assert llm.image_part(b"x")["type"] == "image_url"
+    assert llm.image_part(b"x")["type"] == "input_image"
 
 
 def test_messages_converted_for_responses_api(monkeypatch):
@@ -68,11 +68,47 @@ def test_reasoning_budget_and_retry(monkeypatch):
                   "output": [{"type": "reasoning", "summary": []}], "usage": {"output_tokens": 5}}
     ok = {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": '{"k": 1}'}]}]}
 
-    def fake(model, messages, max_tokens, reasoning):
+    def fake(model, messages, max_tokens, reasoning, r):
         sent.append((max_tokens, reasoning))
         return incomplete if len(sent) == 1 else ok
 
     monkeypatch.setattr(llm, "_responses_call", fake)
     monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
     assert llm.chat_json("muse-spark-1.3", [], max_tokens=900, r=object()) == {"k": 1}
-    assert sent == [(3400, True), (6800, True)]
+    assert sent == [(1412, True), (2824, True)]
+
+
+def test_chat_json_rejects_non_meta_endpoint(monkeypatch):
+    monkeypatch.setattr(settings, "llama_api_url", "https://api.llama.com/compat/v1/")
+    try:
+        llm.chat_json("model", [], r=object())
+    except RuntimeError as exc:
+        assert "Meta Responses API" in str(exc)
+    else:
+        raise AssertionError("chat_json should reject non-Meta endpoints")
+
+
+def test_call_budget_is_reserved_atomically(monkeypatch):
+    class BudgetRedis:
+        count = 0
+
+        def eval(self, _script, _keys, _key, limit):
+            if self.count >= limit:
+                return 0
+            self.count += 1
+            return self.count
+
+        def get(self, _key):
+            return self.count
+
+    r = BudgetRedis()
+    monkeypatch.setattr(settings, "max_llm_calls_per_day", 2)
+    llm._reserve_call(r)
+    llm._reserve_call(r)
+    assert not llm.budget_ok(r)
+    try:
+        llm._reserve_call(r)
+    except llm.CallBudgetExceeded:
+        pass
+    else:
+        raise AssertionError("call budget should reject requests at the cap")

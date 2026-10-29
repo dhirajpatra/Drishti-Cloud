@@ -39,7 +39,7 @@ As per Meta's vision:
 
 ```
 IMAGES ──┐
-VIDEO  ──┼──> Muse Spark (api.llama.com/compat/v1/) -> Alert JSON
+VIDEO  ──┼──> Muse Spark (api.meta.ai/v1/responses) -> Alert JSON
 TEXT   ──┤
 DOCS   ──┘
        + Muse Wonder (habits + Neo4j + News)
@@ -79,7 +79,7 @@ Pi 5 16GB x N                    gateway (FastAPI :8000)
 | **feed-ingestor** | Python + OpenCV | RTSP feeds: mall_1_cam_1, senior_home_kitchen, school_gate, icu_bed_5 | Samples every 30 sec LOW_COST_MODE, scene hash dedup |
 | **sam3-segmenter** | Meta API SAM 3.1 | frame.jpg | {masks: [{label: "stove", bbox}, {label:"person"}]} |
 | **ocr-reader** | PaddleOCR + Llama 3.2 Vision | Frame crop | {texts: [{text:"HR 120 ALARM"}]} |
-| **spark-multimodal** | Muse Spark via api.llama.com/compat/v1/ | IMAGES+VIDEO+TEXT+DOCS | {alert_level: NORMAL/ALERT/CRITICAL, reason} |
+| **spark-multimodal** | Muse Spark via Meta Responses API | IMAGES+VIDEO+TEXT+DOCS | {alert_level: NORMAL/ALERT/CRITICAL, reason} |
 | **wonder-vertical-reasoner** | Muse Wonder + Neo4j | Spark output + habit graph + news | {final_decision, habit_match, speak_text} |
 | **image-alert** | Muse Image | Frame + masks | Visual proof jpg with red circles |
 | **news-context-agent** | Wonder + News API | Location | {headline:"Bangalore power cut", context} |
@@ -160,9 +160,10 @@ RETURN e, o
 
 ## 💰 Cost Optimization (User Requirement: ₹140/month)
 
-- **LOW_COST_MODE=true:** Sample every 30 sec (not 10 sec), scene hash comparison, PIR wake logic, batch 2 cameras into one API call, cache Wonder answers
+- **LOW_COST_MODE=true:** Sample frames, reuse analysis for unchanged scenes for up to 15 minutes, wake on scene changes/PIR, and avoid Wonder calls for CRITICAL alerts
+- **API call cap:** 1,000 Meta requests/day across all agents, including SAM and OCR; after the cap, cached perception and deterministic rules continue
 - **Target:** ₹60/month Meta API (using $150 free credits + $225 partner credits first) + ₹80 electricity = ₹140/month
-- **Billing:** Axis Visa XX9468 with e-Mandate YinnrMJWBS - set spend limit $10-20 in api.llama.com dashboard
+- **Billing:** Set an API spend limit in your Meta Model API account dashboard
 
 ---
 
@@ -170,7 +171,7 @@ RETURN e, o
 
 ### Prerequisites
 - Docker & Docker Compose
-- LLAMA_API_KEY from https://api.llama.com/ (Muse Spark, Wonder, Image, SAM 3.1)
+- LLAMA_API_KEY from the Meta Model API (Muse Spark, Wonder, Image, SAM 3.1)
 - NEWS_API_KEY (optional)
 
 ### 1. Clone & Env
@@ -180,7 +181,7 @@ cd drishti-cloud
 cp .env.example .env
 # Edit .env:
 # LLAMA_API_KEY=your_key
-# LLAMA_API_URL=https://api.llama.com/compat/v1/
+# LLAMA_API_URL=https://api.meta.ai/v1/responses
 # LOW_COST_MODE=true
 # RTSP_FEEDS=rtsp://mall_cam_1,rtsp://senior_home_kitchen
 ```
@@ -252,26 +253,24 @@ changing `DATABASE_URL`, `REDIS_URI`, `NEO4J_URI`. Scale any agent: `docker comp
 
 ## 🧩 Meta Model API Usage
 
-All via OpenAI-compatible endpoint:
+The Python services call Meta's Responses API directly with `requests`; they do not require the OpenAI SDK.
 
 ```python
-from openai import OpenAI
-client = OpenAI(
-  base_url="https://api.llama.com/compat/v1/",
-  api_key=os.getenv("LLAMA_API_KEY")
+import os
+import requests
+
+response = requests.post(
+    os.getenv("LLAMA_API_URL", "https://api.meta.ai/v1/responses"),
+    headers={"Authorization": f"Bearer {os.environ['LLAMA_API_KEY']}"},
+    json={
+        "model": os.getenv("SPARK_MODEL", "muse-spark-1.3"),
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": "Assess this scene."}]}],
+        "max_output_tokens": 512,
+    },
+    timeout=90,
 )
-
-# SAM 3.1
-client.chat.completions.create(model="Llama-SAM-3.1", ...)
-
-# Muse Spark (Maverick)
-client.chat.completions.create(model="Llama-4-Maverick", ...)
-
-# Muse Wonder (Behemoth)
-client.chat.completions.create(model="Llama-4-Behemoth", ...)
-
-# Muse Image
-client.images.generate(model="Llama-Image", prompt="...")
+response.raise_for_status()
+print(response.json())
 ```
 
 ---

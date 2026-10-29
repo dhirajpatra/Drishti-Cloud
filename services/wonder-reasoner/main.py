@@ -1,6 +1,6 @@
 """Wonder agent (Muse Wonder + Neo4j): assessed -> decided.
 
-Slow path, only for ALERT/CRITICAL. Pulls the tenant's habit graph, recent events and news context and decides:
+Slow path for ALERT. Pulls the tenant's habit graph, recent events and news context and decides:
   * a known habit explains an ALERT (e.g. Dad's 05:00 walk opens the door)  -> suppressed (NORMAL)
   * world context raises the stakes (bomb threat news + unattended bag)      -> ALERT escalated to CRITICAL
   * CRITICAL is never suppressed by habits or by the LLM
@@ -79,12 +79,12 @@ def handle(p: dict, r) -> None:
         final, decision = "CRITICAL", "ESCALATED_NEWS"
         rationale = f"Escalated because of local news: '{headline}'. {rationale}".strip()
 
-    if not settings.mock_mode and llm.budget_ok(r):
+    if level == "ALERT" and not settings.mock_mode and llm.budget_ok(r):
         try:
             res = llm.chat_json(settings.wonder_model, [{"role": "user", "content": PROMPT.format(
                 tenant_id=tid, vertical=p["vertical"], level=level, rule=rule, reason=p.get("reason", ""), hour=hour,
                 habits=[h["desc"] for h in habits][:10] or "none", events=events or "none",
-                news=[n["headline"] for n in news] or "none")}], max_tokens=400, r=r)
+                news=[n["headline"] for n in news] or "none")}], max_tokens=250, r=r)
             wl = str(res.get("final_level", final)).upper()
             if wl in LEVELS:
                 lowered = RANK[wl] < RANK[final]

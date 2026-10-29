@@ -14,24 +14,24 @@ const agents = [
 ];
 
 const codeTabs: Record<string,{lang:string,code:string}> = {
-  perception: { lang:"perception_agent.py", code:`# Perception Agent — SAM 3.1 via Meta Model API (OpenAI-compatible)
+  perception: { lang:"perception_agent.py", code:`# Perception Agent — SAM 3.1 via Meta Responses API
 import os, json, base64, httpx
 from redis_bus import publish
 
-BASE = "https://api.llama.com/compat/v1/"
+BASE = "https://api.meta.ai/v1/"
 client = httpx.Client(base_url=BASE, headers={
     "Authorization": f"Bearer {os.environ['LLAMA_API_KEY']}"})
 
 def segment(frame_bytes: bytes, tenant_id: str) -> dict:
     b64 = base64.b64encode(frame_bytes).decode()
-    r = client.post("chat/completions", json={
+    r = client.post("responses", json={
         "model": "sam-3.1",
-        "messages": [{"role": "user", "content": [
-            {"type": "image_url",
-             "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-            {"type": "text",
-             "text": "Segment all people, pets, doors, stairs, stove. Return JSON masks+bboxes."}]}]})
-    scene = json.loads(r.json()["choices"][0]["message"]["content"])
+        "input": [{"role": "user", "content": [
+            {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64}"},
+            {"type": "input_text", "text": "Segment visible people, pets, doors, stairs, stove. Return JSON masks+bboxes."}]}],
+        "max_output_tokens": 600})
+    r.raise_for_status()
+    scene = json.loads(r.json()["output_text"])
     scene["tenant_id"] = tenant_id
     publish("scene.graph", scene)          # → Redis queue
     return scene`},
@@ -39,7 +39,7 @@ def segment(frame_bytes: bytes, tenant_id: str) -> dict:
 import os, json, httpx
 from redis_bus import subscribe, publish
 
-client = httpx.Client(base_url="https://api.llama.com/compat/v1/",
+client = httpx.Client(base_url="https://api.meta.ai/v1/",
     headers={"Authorization": f"Bearer {os.environ['LLAMA_API_KEY']}"})
 
 SYSTEM = """You are Spark Guard, a home-safety sentinel.
@@ -47,19 +47,19 @@ Given a scene graph, return ONLY JSON:
 {"risk":0..1,"type":"fire|fall|intruder|child_hazard|none","reason":"..."}"""
 
 for msg in subscribe("scene.graph"):
-    r = client.post("chat/completions", json={
+    r = client.post("responses", json={
         "model": "muse-spark-1",
-        "messages": [{"role":"system","content":SYSTEM},
-                     {"role":"user","content":json.dumps(msg)}],
-        "max_tokens": 200, "temperature": 0})
-    verdict = json.loads(r.json()["choices"][0]["message"]["content"])
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": SYSTEM + "\\n" + json.dumps(msg)}]}],
+        "max_output_tokens": 350})
+    r.raise_for_status()
+    verdict = json.loads(r.json()["output_text"])
     if verdict["risk"] >= 0.7:
         publish("alert.candidate", {**verdict, "tenant_id": msg["tenant_id"]})`},
   wonder: { lang:"wonder_reasoner.py", code:`# Wonder Reasoner — Muse Wonder + Neo4j context + live news
 import os, json, httpx
 from neo4j import GraphDatabase
 
-client = httpx.Client(base_url="https://api.llama.com/compat/v1/",
+client = httpx.Client(base_url="https://api.meta.ai/v1/",
     headers={"Authorization": f"Bearer {os.environ['LLAMA_API_KEY']}"})
 graph = GraphDatabase.driver("bolt://neo4j:7687",
     auth=("neo4j", os.environ["NEO4J_PASSWORD"]))
@@ -81,10 +81,12 @@ Home context (graph + news): {ctx}
 Think step-by-step: is this a true emergency or a known habit?
 Consider news context (e.g. power cut explains darkness).
 Return JSON: {{act: speak|whatsapp|alarm|ignore, rationale}}"""
-    r = client.post("chat/completions", json={
+    r = client.post("responses", json={
         "model": "muse-wonder-1",
-        "messages": [{"role":"user","content":prompt}], "temperature": 0.2})
-    return json.loads(r.json()["choices"][0]["message"]["content"])`},
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}]}],
+        "max_output_tokens": 250})
+    r.raise_for_status()
+    return json.loads(r.json()["output_text"])`},
   memory: { lang:"memory_agent.py", code:`# Memory Agent — Llama open-weights (local) + Neo4j graph writes
 import numpy as np
 from neo4j import GraphDatabase
@@ -379,7 +381,7 @@ CREATE CONSTRAINT person_key IF NOT EXISTS
 
       {/* 7 CODE */}
       <section id="code" className="py-8">
-        <SectionHead kicker="06 · AGENT CODE" title="Agent Implementations" sub="All Meta models via one OpenAI-compatible endpoint: api.llama.com/compat/v1/ — swap model names, keep the code."/>
+        <SectionHead kicker="06 · AGENT CODE" title="Agent Implementations" sub="Meta models use the Responses API at api.meta.ai/v1/responses."/>
         <div className="flex flex-wrap gap-2 mb-4">{(Object.keys(codeTabs) as (keyof typeof codeTabs)[]).map(k=>(<button key={k} onClick={()=>setActiveCode(k)} className="mono text-[11px] px-3 py-2 rounded-lg border" style={{background:activeCode===k?"var(--accent)":"var(--surface)",color:activeCode===k?"#04121a":"var(--muted)",borderColor:"var(--line)",fontWeight:activeCode===k?700:400}}>{codeTabs[k].lang}</button>))}</div>
         <CodeBlock title={codeTabs[activeCode].lang} code={codeTabs[activeCode].code}/>
       </section>

@@ -75,7 +75,7 @@ def sam_segment(jpeg: bytes, vertical: str, r) -> list[dict]:
             log.warning("%s gave no usable JSON (%s) - using %s for %d min (set SAM_MODE=sam to force)",
                         settings.sam_model, e, settings.spark_model, SAM_OFF_TTL // 60)
     if out is None:
-        out = llm.chat_json(settings.spark_model, msgs, max_tokens=900, r=r)
+        out = llm.chat_json(settings.spark_model, msgs, max_tokens=600, r=r, reasoning=False)
     return clean(out.get("objects"))
 
 
@@ -94,7 +94,12 @@ def handle(p: dict, r) -> None:
         if jpeg is None:
             log.warning("frame %s expired before segmentation - dropped", p["frame_id"])
             return
-        objects = sam_segment(jpeg, p["vertical"], r)
+        try:
+            objects = sam_segment(jpeg, p["vertical"], r)
+        except llm.CallBudgetExceeded:
+            objects = clean(json.loads(cached)) if cached else []
+            source = "budget_fallback"
+            log.warning("daily Meta API call budget exhausted - using cached segmentation for %s/%s", tid, cam)
     if source != "cache":
         r.set(cache_key, json.dumps(objects), ex=SEG_TTL)
 

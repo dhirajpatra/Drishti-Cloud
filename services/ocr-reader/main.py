@@ -25,7 +25,7 @@ def read_text(jpeg: bytes, r) -> list[str]:
         '(keep numbers and words like ALARM). Return JSON only: {"texts":["..."]}. Empty list if none.'
     )
     out = llm.chat_json(settings.ocr_model, [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}],
-                        max_tokens=400, r=r)
+                        max_tokens=200, r=r, reasoning=False)
     texts = out.get("texts")
     return [str(t)[:160] for t in texts][:20] if isinstance(texts, list) else []
 
@@ -50,8 +50,12 @@ def handle(p: dict, r) -> None:
         else:
             jpeg = bus.get_frame(p["frame_id"])
             if jpeg is not None:
-                texts = read_text(jpeg, r)
-                r.set(key, json.dumps(texts), ex=OCR_TTL)
+                try:
+                    texts = read_text(jpeg, r)
+                    r.set(key, json.dumps(texts), ex=OCR_TTL)
+                except llm.CallBudgetExceeded:
+                    texts = json.loads(cached) if cached else []
+                    log.warning("daily Meta API call budget exhausted - using cached OCR for %s/%s", tid, cam)
     bus.publish("perceived", tid, {**p, "ocr_texts": texts}, r)
 
 

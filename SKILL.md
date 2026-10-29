@@ -20,7 +20,7 @@ All services run via `docker compose up` with Neo4j graph database.
 ### Multimodality for Developers (Your Image)
 ```
 IMAGES ──┐
-VIDEO  ──┼──> Muse Spark (api.llama.com/compat/v1/) -> Decision JSON
+VIDEO  ──┼──> Muse Spark (api.meta.ai/v1/responses) -> Decision JSON
 TEXT   ──┤
 DOCS   ──┘
        +
@@ -85,7 +85,7 @@ services:
     build: ./services/sam3-segmenter
     environment:
       - LLAMA_API_KEY=${LLAMA_API_KEY}
-      - LLAMA_API_URL=https://api.llama.com/compat/v1
+      - LLAMA_API_URL=https://api.meta.ai/v1/responses
     # Calls SAM 3.1 via Meta Model API
 
   ocr-reader:
@@ -97,14 +97,14 @@ services:
     build: ./services/spark-multimodal
     environment:
       - LLAMA_API_KEY=${LLAMA_API_KEY}
-      - LLAMA_MODEL=Meta-Llama-4-Maverick
+      - SPARK_MODEL=muse-spark-1.3
     # IMAGES+VIDEO+TEXT+DOCS -> Spark
 
   wonder-vertical-reasoner:
     build: ./services/wonder-reasoner
     environment:
       - LLAMA_API_KEY=${LLAMA_API_KEY}
-      - LLAMA_MODEL=Meta-Llama-4-Behemoth
+      - WONDER_MODEL=muse-wonder-1.0
       - NEO4J_URI=bolt://neo4j:7687
 
   image-alert:
@@ -143,20 +143,21 @@ volumes:
 - Scene hash: Avoid duplicate API calls if frame unchanged
 - Output -> Redis: queue:raw_frames:{tenant_id}
 
-### 4.2 sam3-segmenter (SAM 3.1 via Meta API)
+### 4.2 sam3-segmenter (SAM 3.1 via Meta Responses API)
 ```python
-from openai import OpenAI
-client = OpenAI(base_url="https://api.llama.com/compat/v1/", api_key=os.getenv("LLAMA_API_KEY"))
-response = client.chat.completions.create(
-  model="Llama-SAM-3.1",
-  messages=[{
-    "role": "user",
-    "content": [
-      {"type": "text", "text": "Segment all: stove, keys, person, bag, bed, door, child, patient"},
-      {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
-    ]
-  }]
+import os
+import requests
+
+response = requests.post(
+  os.getenv("LLAMA_API_URL", "https://api.meta.ai/v1/responses"),
+  headers={"Authorization": f"Bearer {os.environ['LLAMA_API_KEY']}"},
+  json={"model": "sam-3.1", "input": [{"role": "user", "content": [
+    {"type": "input_text", "text": "Segment visible stove, keys, person, bag, bed, door, child, patient"},
+    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{b64}"}
+  ]}], "max_output_tokens": 600},
+  timeout=90,
 )
+response.raise_for_status()
 ```
 
 ### 4.3 spark-multimodal (Muse Spark)
@@ -226,8 +227,8 @@ Each tenant Pi:
 ## 8. Environment Variables
 
 ```
-LLAMA_API_KEY=xxx # from api.llama.com, $150 free credits
-LLAMA_API_URL=https://api.llama.com/compat/v1/
+LLAMA_API_KEY=xxx # Meta Model API key
+LLAMA_API_URL=https://api.meta.ai/v1/responses
 NEO4J_URI=bolt://neo4j:7687
 REDIS_URI=redis://redis:6379
 LOW_COST_MODE=true # 30 sec sampling

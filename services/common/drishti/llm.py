@@ -1,5 +1,5 @@
 # services/common/drishti/llm.py
-"""Meta Model API client - supports the new api.meta.ai /v1/responses endpoint and the old OpenAI-compatible /compat/v1."""
+"""Meta Model API client using the Responses API."""
 
 from __future__ import annotations
 
@@ -13,25 +13,19 @@ from typing import Any
 
 import redis
 import requests
-from openai import OpenAI
 
 from .bus import redis_client
 from .config import settings
 from .log import get_logger
 
 log = get_logger("llm")
-_client: OpenAI | None = None
-
-def client() -> OpenAI:
-    global _client
-    if _client is None:
-        if not settings.llama_api_key:
-            raise RuntimeError("LLAMA_API_KEY is not set (or enable MOCK_MODE=true)")
-        _client = OpenAI(base_url=settings.llama_api_url, api_key=settings.llama_api_key, timeout=60, max_retries=2)
-    return _client
 
 class NoOutputText(ValueError):
     """The model answered 200 but with no text (e.g. a segmentation model returning masks)."""
+
+
+class CallBudgetExceeded(RuntimeError):
+    """The daily Meta API call budget has been exhausted."""
 
 
 def is_responses_api() -> bool:
@@ -42,9 +36,7 @@ def is_responses_api() -> bool:
 def image_part(jpeg: bytes) -> dict:
     b64 = base64.b64encode(jpeg).decode()
     url = f"data:image/jpeg;base64,{b64}"
-    if is_responses_api():
-        return {"type": "input_image", "image_url": url}          # Responses API
-    return {"type": "image_url", "image_url": {"url": url}}        # old compat/v1
+    return {"type": "input_image", "image_url": url}
 
 
 def to_responses_input(messages: list[dict]) -> list[dict]:
@@ -106,15 +98,30 @@ def describe_shape(obj: Any, limit: int = 3000, _depth: int = 0) -> str:
 def _today_key() -> str:
     return f"usage:calls:{date.today().isoformat()}"
 
+
+def _reserve_call(r: redis.Redis) -> None:
+    reserved = r.eval(
+        "local count=tonumber(redis.call('GET', KEYS[1]) or '0') "
+        "if count >= tonumber(ARGV[1]) then return 0 end "
+        "local next=redis.call('INCR', KEYS[1]) "
+        "redis.call('EXPIRE', KEYS[1], 259200) "
+        "return next",
+        1,
+        _today_key(),
+        settings.max_llm_calls_per_day,
+    )
+    if not reserved:
+        raise CallBudgetExceeded("daily Meta API call budget exhausted")
+
+
 def budget_ok(r: redis.Redis | None = None) -> bool:
     r = r or redis_client()
     return int(r.get(_today_key()) or 0) < settings.max_llm_calls_per_day
 
+
 def _record(model: str, usage: Any, r: redis.Redis) -> None:
     day = date.today().isoformat()
     pipe = r.pipeline()
-    pipe.incr(_today_key())
-    pipe.expire(_today_key(), 3 * 86400)
     key = f"usage:{day}:{model}"
     pipe.hincrby(key, "calls", 1)
     if usage is not None:
@@ -143,7 +150,7 @@ def _usage(data: dict):
     return types.SimpleNamespace(prompt_tokens=u.get("input_tokens", 0), completion_tokens=u.get("output_tokens", 0))
 
 
-def _responses_call(model: str, messages: list[dict], max_tokens: int, reasoning: bool) -> dict:
+def _responses_call(model: str, messages: list[dict], max_tokens: int, reasoning: bool, r: redis.Redis) -> dict:
     """One POST to /v1/responses. Reasoning models (muse-*) spend output tokens on thinking, so they get headroom."""
     url = settings.llama_api_url.rstrip("/")
     if not url.endswith("/responses"):
@@ -153,40 +160,39 @@ def _responses_call(model: str, messages: list[dict], max_tokens: int, reasoning
     effort = os.getenv("REASONING_EFFORT", "low").strip().lower()
     if reasoning and effort and effort != "default":
         payload["reasoning"] = {"effort": effort}
-    resp = requests.post(url, headers=headers, json=payload, timeout=90)
+    def send() -> requests.Response:
+        _reserve_call(r)
+        return requests.post(url, headers=headers, json=payload, timeout=90)
+
+    resp = send()
     if resp.status_code == 400 and "reasoning" in payload and "reasoning" in resp.text.lower():
         log.warning("model %s rejected reasoning.effort=%s - retrying without it", model, effort)
         payload.pop("reasoning")
-        resp = requests.post(url, headers=headers, json=payload, timeout=90)
+        resp = send()
     if resp.status_code != 200:
         log.error("Meta API Error %s: %s", resp.status_code, resp.text[:500])
         resp.raise_for_status()
     return resp.json()
 
 
-def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700, temperature: float = 0.1,
+def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700,
               r: redis.Redis | None = None, reasoning: bool = True) -> dict:
+    if not is_responses_api():
+        raise RuntimeError("LLAMA_API_URL must point to the Meta Responses API")
     r = r or redis_client()
 
-    # NEW API: https://api.meta.ai/v1/responses
-    if is_responses_api():
-        headroom = int(os.getenv("REASONING_HEADROOM_TOKENS", "2500")) if reasoning else 0
-        budget = max_tokens + headroom
-        data = _responses_call(model, messages, budget, reasoning)
-        text = extract_response_text(data)
-        reason = (data.get("incomplete_details") or {}).get("reason")
-        if not text and data.get("status") == "incomplete" and reason == "max_output_tokens":
-            log.warning("%s ran out of tokens while reasoning (%d) - retrying once with %d", model, budget, budget * 2)
-            _record(model, _usage(data), r)
-            data = _responses_call(model, messages, budget * 2, reasoning)
-            text = extract_response_text(data)
-        if not text:
-            log.error("Meta API returned no text (model=%s) shape: %s", model, describe_shape(data))
-            raise NoOutputText(f"{model} returned no output text")
+    headroom = int(os.getenv("REASONING_HEADROOM_TOKENS", "512")) if reasoning else 0
+    budget = max_tokens + headroom
+    data = _responses_call(model, messages, budget, reasoning, r)
+    text = extract_response_text(data)
+    reason = (data.get("incomplete_details") or {}).get("reason")
+    if not text and data.get("status") == "incomplete" and reason == "max_output_tokens":
+        log.warning("%s ran out of tokens while reasoning (%d) - retrying once with %d", model, budget, budget * 2)
         _record(model, _usage(data), r)
-        return parse_json(text)
-
-    # OLD API: compat/v1 - use OpenAI client
-    resp = client().chat.completions.create(model=model, messages=messages, max_tokens=max_tokens, temperature=temperature)
-    _record(model, getattr(resp, "usage", None), r)
-    return parse_json(resp.choices[0].message.content or "")
+        data = _responses_call(model, messages, budget * 2, reasoning, r)
+        text = extract_response_text(data)
+    if not text:
+        log.error("Meta API returned no text (model=%s) shape: %s", model, describe_shape(data))
+        raise NoOutputText(f"{model} returned no output text")
+    _record(model, _usage(data), r)
+    return parse_json(text)

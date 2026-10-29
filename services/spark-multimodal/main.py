@@ -63,7 +63,7 @@ def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | No
         rule_ids=VERTICALS[v]["rules"],
     )
     out = llm.chat_json(settings.spark_model, [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}],
-                        max_tokens=500, r=r)
+                        max_tokens=350, r=r, reasoning=False)
     level = str(out.get("level", "NORMAL")).upper()
     if level not in LEVELS:
         level = "NORMAL"

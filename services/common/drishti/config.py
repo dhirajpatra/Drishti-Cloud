@@ -40,14 +40,14 @@ class Settings:
         self.neo4j_user = _s("NEO4J_USER", "neo4j")
         self.neo4j_password = _s("NEO4J_PASSWORD", "drishti123")
 
-        # --- Meta Model API (OpenAI-compatible)
+        # --- Meta Responses API
         self.llama_api_key = _s("LLAMA_API_KEY")
-        self.llama_api_url = _s("LLAMA_API_URL", "https://api.llama.com/compat/v1/")
-        self.sam_model = _s("SAM_MODEL", "Llama-SAM-3.1")
-        self.spark_model = _s("SPARK_MODEL", "Llama-4-Maverick")
-        self.wonder_model = _s("WONDER_MODEL", "Llama-4-Behemoth")
-        self.ocr_model = _s("OCR_MODEL", "Llama-4-Maverick")
-        self.max_llm_calls_per_day = _i("MAX_LLM_CALLS_PER_DAY", 5000)
+        self.llama_api_url = _s("LLAMA_API_URL", "https://api.meta.ai/v1/responses")
+        self.sam_model = _s("SAM_MODEL", "sam-3.1")
+        self.spark_model = _s("SPARK_MODEL", "muse-spark-1.3")
+        self.wonder_model = _s("WONDER_MODEL", "muse-wonder-1.0")
+        self.ocr_model = _s("OCR_MODEL", "muse-spark-1.3")
+        self.max_llm_calls_per_day = _i("MAX_LLM_CALLS_PER_DAY", 1000)
 
         # MOCK_MODE=auto -> on whenever there is no API key, so a laptop demo "just works".
         mm = _s("MOCK_MODE", "auto").lower()
@@ -59,7 +59,7 @@ class Settings:
         self.event_image_ttl_sec = _i("EVENT_IMAGE_TTL_SEC", 21600)  # ...for this long (default 6 h)
         self.sample_interval_sec = _i("SAMPLE_INTERVAL_SEC", 30)
         self.hash_distance = _i("HASH_DISTANCE", 6)          # dhash bits that may differ = "same scene"
-        self.force_refresh_sec = _i("FORCE_REFRESH_SEC", 300)  # re-analyse a static scene at least this often
+        self.force_refresh_sec = _i("FORCE_REFRESH_SEC", 900)  # periodically re-analyse an unchanged scene
 
         # --- gateway
         self.auth_required = _b("AUTH_REQUIRED", False)
