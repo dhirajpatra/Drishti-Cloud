@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import types
 from datetime import date
@@ -137,29 +138,52 @@ def parse_json(text: str) -> dict:
         raise ValueError("model JSON is not an object")
     return out
 
+def _usage(data: dict):
+    u = data.get("usage") or {}
+    return types.SimpleNamespace(prompt_tokens=u.get("input_tokens", 0), completion_tokens=u.get("output_tokens", 0))
+
+
+def _responses_call(model: str, messages: list[dict], max_tokens: int, reasoning: bool) -> dict:
+    """One POST to /v1/responses. Reasoning models (muse-*) spend output tokens on thinking, so they get headroom."""
+    url = settings.llama_api_url.rstrip("/")
+    if not url.endswith("/responses"):
+        url += "/responses"
+    headers = {"Authorization": f"Bearer {settings.llama_api_key}", "Content-Type": "application/json"}
+    payload: dict = {"model": model, "input": to_responses_input(messages), "max_output_tokens": max_tokens}
+    effort = os.getenv("REASONING_EFFORT", "low").strip().lower()
+    if reasoning and effort and effort != "default":
+        payload["reasoning"] = {"effort": effort}
+    resp = requests.post(url, headers=headers, json=payload, timeout=90)
+    if resp.status_code == 400 and "reasoning" in payload and "reasoning" in resp.text.lower():
+        log.warning("model %s rejected reasoning.effort=%s - retrying without it", model, effort)
+        payload.pop("reasoning")
+        resp = requests.post(url, headers=headers, json=payload, timeout=90)
+    if resp.status_code != 200:
+        log.error("Meta API Error %s: %s", resp.status_code, resp.text[:500])
+        resp.raise_for_status()
+    return resp.json()
+
+
 def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700, temperature: float = 0.1,
-              r: redis.Redis | None = None) -> dict:
+              r: redis.Redis | None = None, reasoning: bool = True) -> dict:
     r = r or redis_client()
-    
+
     # NEW API: https://api.meta.ai/v1/responses
     if is_responses_api():
-        url = settings.llama_api_url.rstrip("/")
-        if not url.endswith("/responses"):
-            url += "/responses"
-        headers = {"Authorization": f"Bearer {settings.llama_api_key}", "Content-Type": "application/json"}
-        payload = {"model": model, "input": to_responses_input(messages), "max_output_tokens": max_tokens}
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        if resp.status_code != 200:
-            log.error("Meta API Error %s: %s", resp.status_code, resp.text[:500])
-            resp.raise_for_status()
-        data = resp.json()
+        headroom = int(os.getenv("REASONING_HEADROOM_TOKENS", "2500")) if reasoning else 0
+        budget = max_tokens + headroom
+        data = _responses_call(model, messages, budget, reasoning)
         text = extract_response_text(data)
+        reason = (data.get("incomplete_details") or {}).get("reason")
+        if not text and data.get("status") == "incomplete" and reason == "max_output_tokens":
+            log.warning("%s ran out of tokens while reasoning (%d) - retrying once with %d", model, budget, budget * 2)
+            _record(model, _usage(data), r)
+            data = _responses_call(model, messages, budget * 2, reasoning)
+            text = extract_response_text(data)
         if not text:
             log.error("Meta API returned no text (model=%s) shape: %s", model, describe_shape(data))
             raise NoOutputText(f"{model} returned no output text")
-        usage = data.get("usage") or {}
-        _record(model, types.SimpleNamespace(prompt_tokens=usage.get("input_tokens", 0),
-                                             completion_tokens=usage.get("output_tokens", 0)), r)
+        _record(model, _usage(data), r)
         return parse_json(text)
 
     # OLD API: compat/v1 - use OpenAI client

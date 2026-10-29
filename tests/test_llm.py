@@ -50,5 +50,29 @@ def test_sam_falls_back_to_spark_when_no_text(monkeypatch):
 
     monkeypatch.setattr(sam.llm, "chat_json", fake)
     monkeypatch.setattr(settings, "sam_model", "sam-3.1"); monkeypatch.setattr(settings, "spark_model", "muse-spark-1.3")
-    out = sam.sam_segment(b"x", "mall_security", None)
+    class R(dict):
+        def get(self, k): return dict.get(self, k)
+        def set(self, k, v, ex=None): self[k] = v
+    rr = R()
+    out = sam.sam_segment(b"x", "mall_security", rr)
     assert calls == ["sam-3.1", "muse-spark-1.3"] and out[0]["label"] == "bag"
+    assert rr.get(sam.SAM_OFF_KEY)             # breaker tripped
+    calls.clear(); sam.sam_segment(b"x", "mall_security", rr)
+    assert calls == ["muse-spark-1.3"]         # SAM skipped while breaker is open
+
+
+def test_reasoning_budget_and_retry(monkeypatch):
+    monkeypatch.setattr(settings, "llama_api_url", "https://api.meta.ai/v1/responses")
+    sent = []
+    incomplete = {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+                  "output": [{"type": "reasoning", "summary": []}], "usage": {"output_tokens": 5}}
+    ok = {"status": "completed", "output": [{"type": "message", "content": [{"type": "output_text", "text": '{"k": 1}'}]}]}
+
+    def fake(model, messages, max_tokens, reasoning):
+        sent.append((max_tokens, reasoning))
+        return incomplete if len(sent) == 1 else ok
+
+    monkeypatch.setattr(llm, "_responses_call", fake)
+    monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
+    assert llm.chat_json("muse-spark-1.3", [], max_tokens=900, r=object()) == {"k": 1}
+    assert sent == [(3400, True), (6800, True)]

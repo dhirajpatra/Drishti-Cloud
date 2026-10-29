@@ -7,6 +7,7 @@ MOCK_MODE: objects come from the simulator's `_sim` hint (no API, no key).
 from __future__ import annotations
 
 import json
+import os
 
 from drishti import bus, llm, simulate
 from drishti.config import settings
@@ -15,6 +16,8 @@ from drishti.verticals import VERTICALS
 
 log = get_logger("sam3-segmenter")
 SEG_TTL = 3600
+SAM_OFF_KEY = "seg:sam_disabled"
+SAM_OFF_TTL = 3600
 
 
 def clamp_box(b) -> list[float] | None:
@@ -58,13 +61,20 @@ def sam_segment(jpeg: bytes, vertical: str, r) -> list[dict]:
         "with bbox as fractions of image width/height (0-1)."
     )
     msgs = [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}]
-    try:
-        out = llm.chat_json(settings.sam_model, msgs, max_tokens=900, r=r)
-    except (llm.NoOutputText, ValueError) as e:
-        # SAM answered but not with parseable JSON text: fall back to the Spark vision model so the pipeline keeps flowing.
-        if settings.spark_model == settings.sam_model:
-            raise
-        log.warning("%s gave no usable JSON (%s) - falling back to %s", settings.sam_model, e, settings.spark_model)
+    mode = os.getenv("SAM_MODE", "auto").lower()          # auto | sam | spark
+    use_sam = mode == "sam" or (mode == "auto" and not r.get(SAM_OFF_KEY))
+    out = None
+    if use_sam:
+        try:
+            out = llm.chat_json(settings.sam_model, msgs, max_tokens=900, r=r, reasoning=False)
+        except (llm.NoOutputText, ValueError) as e:
+            if mode == "sam" or settings.spark_model == settings.sam_model:
+                raise
+            # SAM looks at the image but returns no JSON text: stop paying for it for a while, use the Spark vision model
+            r.set(SAM_OFF_KEY, "1", ex=SAM_OFF_TTL)
+            log.warning("%s gave no usable JSON (%s) - using %s for %d min (set SAM_MODE=sam to force)",
+                        settings.sam_model, e, settings.spark_model, SAM_OFF_TTL // 60)
+    if out is None:
         out = llm.chat_json(settings.spark_model, msgs, max_tokens=900, r=r)
     return clean(out.get("objects"))
 
