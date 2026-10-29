@@ -15,7 +15,7 @@ Built entirely with **Muse Spark, Wonder, Image, SAM 3.1 via Meta Model API**, o
 - [Multi-Feed Multi-Vertical Architecture](./artifacts/drishti_multi_feed_multi)
 - [Multi-Agent Cloud Architecture](./artifacts/drishti_cloud_multi_agent)
 - [Pi Home Sentinel](./artifacts/drishti_pi_home_sentinel)
-- [Drishti Cloud dashboard](docs/images/drishti-dashboard1.png)
+- [Drishti Cloud dashboard](./docs/images/drishti-dashboard1.png)
 
 ---
 
