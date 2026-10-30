@@ -50,3 +50,14 @@ def test_feed_spec_parsing():
     f = fi.parse_feeds("home_1_bangalore:home_seniors:kitchen=http://192.168.1.4:8765/picture/1/current/")
     assert f == [{"tenant": "home_1_bangalore", "vertical": "home_seniors", "camera": "kitchen",
                   "url": "http://192.168.1.4:8765/picture/1/current/"}]
+
+
+def test_dashboard_registered_feeds_are_sampled_and_override_env(monkeypatch, redis_c):
+    from drishti import bus
+    redis_c.flushdb()
+    bus.put_feed("home_1_bangalore", "kitchen", "home_seniors", "http://new-url/", redis_c)
+    bus.put_feed("school_1", "gate", "school_children", "rtsp://gate/1", redis_c)
+    env = fi.parse_feeds("home_1_bangalore:home_seniors:kitchen=http://old-url/,mall_1:mall_security:cam_1=rtsp://m/1")
+    merged = {(f["tenant"], f["camera"]): f for f in env}
+    merged.update({(f["tenant"], f["camera"]): f for f in bus.registered_feeds()})
+    assert merged[("home_1_bangalore", "kitchen")]["url"] == "http://new-url/" and len(merged) == 3

@@ -116,10 +116,17 @@ def main() -> None:
     else:
         log.info("sampling %d feed(s) every %ss", len(feeds), settings.sample_interval_sec)
 
-    pool = ThreadPoolExecutor(max_workers=max(1, min(16, len(feeds))))
+    pool = ThreadPoolExecutor(max_workers=16)
 
     def tick() -> None:
-        list(pool.map(push, feeds))
+        try:
+            extra = bus.registered_feeds()                       # cameras added from the dashboard (override .env on a clash)
+        except Exception:  # noqa: BLE001
+            log.exception("could not read dashboard-registered feeds")
+            extra = []
+        merged = {(f["tenant"], f["camera"]): f for f in feeds}
+        merged.update({(f["tenant"], f["camera"]): f for f in extra})
+        list(pool.map(push, merged.values()))
 
     bus.run_periodic("feed-ingestor", settings.sample_interval_sec, tick)
 

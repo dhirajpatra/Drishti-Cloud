@@ -24,7 +24,7 @@ Built entirely with **Muse Spark, Wonder, Image, SAM 3.1 via Meta Model API**, o
 **India Context:** 1 guard watches 20 CCTV screens - misses 95% events. Senior at home alone, child at school gate, patient in ICU - no one watching continuously.
 
 **Solution:** One Pi 5 16GB per location + Cloud brain that understands:
-- **Mall:** Unattended bag >2 min, crowd >50, fight, restricted entry
+- **Mall:** Unattended bag >2 min, crowd >50, physical abuse / fight, restricted entry
 - **Home Seniors:** Fall detected, no movement 2 hours, stove ON, door open night
 - **School:** Child alone corridor, stranger without badge, gate open during class
 - **ICU/Hospital:** Patient out of bed, patient on floor, monitor says "ALARM", nurse not visited 1 hour
@@ -496,3 +496,39 @@ MIT - Built for learning and community safety.
 - Neo4j, Redis, Postgres open-source
 
 > "One Pi watches home, 100 Pis watch Bharat" - Drishti Vision
+
+
+---
+
+## Baseten (hackathon credits), WhatsApp, more cameras, abuse detection
+
+**Baseten as a second model provider.** Your hackathon key from the email works only with the hackathon workspace, so use it exactly as
+the email says. Put `baseten:<slug>` in front of any model; `|` means "fall back to the next one":
+```
+BASETEN_API_KEY=<key from the hackathon email>
+SPARK_MODEL=baseten:meta-models/muse-spark-open-1026|muse-spark-1.3     # Baseten first (credits), Meta as fallback
+OCR_MODEL=baseten:meta-models/muse-spark-open-1026|muse-spark-1.3
+```
+Check the key, the slug and image input once: `docker compose exec -T gateway python - < scripts/probe_baseten.py`.
+Notes: Muse Spark Open has no JSON mode (Drishti parses JSON out of the text itself), Baseten has no `sam-3.1` (keep SAM on Meta or set
+`SAM_MODE=spark`), usage is counted separately (`MAX_BASETEN_CALLS_PER_DAY`) and shown as `baseten:...` in the dashboard usage.
+
+**WhatsApp alerts (Meta WhatsApp Business Cloud API).** Set `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `WHATSAPP_TO`. Every alert kind that is
+a message (`whatsapp`, `call_family`, `notify_security`, `notify_admin`, `notify_station`) is sent to every number in `WHATSAPP_TO`;
+`NOTIFY_WEBHOOK_URL` is the fallback if WhatsApp fails. Free-text messages only reach a number that wrote to your business number in the
+last 24 h; for real alerts create an approved template with one body variable and set `WHATSAPP_TEMPLATE`.
+
+**Facebook / Instagram Live.** Meta's Live Video API only lets an app *create and push* a broadcast (RTMPS ingest); there is no API to read
+someone else's live stream or frames, and scraping it breaks Meta's terms. So Drishti does not accept Facebook pages as a camera. Valid ways
+to bring a live source in: the camera's own RTSP / HTTP (MJPEG, snapshot) URL, an HLS `.m3u8` URL, or restream your camera yourself
+(OBS / ffmpeg to an RTSP or HLS endpoint you control).
+
+**Connect more cameras from the dashboard** (mall gates, school corridors, ICU beds, rooms): "Camera sources" panel, or
+`POST /tenants/{id}/feeds {"camera_id":"bedroom","url":"rtsp://..."}`. The ingestor picks it up on its next sample; `DELETE
+/tenants/{id}/feeds/{camera_id}` removes it. URL credentials are masked when listed.
+
+**Physical abuse** (hitting, slapping, kicking, shoving, choking, dragging) is an immediate CRITICAL `physical_abuse` in every vertical
+(home, mall, school, ICU). It fires from the model's judgement (a `violence` object), from the segmentation label (`fight`, `hitting` ...), or
+from words heard ("stop hitting me", "mat maro"). Habits never suppress it. A sudden big change in the picture (`BURST_FRACTION`) is analysed
+without waiting for `MIN_ANALYSIS_GAP_SEC` (still at most every `BURST_GAP_SEC`). One still frame cannot prove abuse: expect false alarms
+(use "False alarm") and, for real coverage, sample often (`SAMPLE_INTERVAL_SEC=30`) - the idle gate keeps that cheap.

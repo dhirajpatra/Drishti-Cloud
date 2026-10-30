@@ -1,5 +1,10 @@
 # services/common/drishti/llm.py
-"""Meta Model API client using the Responses API."""
+"""Model client: Meta Model API (Responses API) and Baseten Model APIs (OpenAI-compatible chat completions).
+
+A model setting is one or more specs separated by "|", tried in order (credentials / daily budget / errors move on to the next):
+    SPARK_MODEL=muse-spark-1.3                                          Meta only
+    SPARK_MODEL=baseten:meta-models/muse-spark-open-1026|muse-spark-1.3 Baseten first (hackathon credits), Meta as the fallback
+"""
 
 from __future__ import annotations
 
@@ -95,11 +100,15 @@ def describe_shape(obj: Any, limit: int = 3000, _depth: int = 0) -> str:
     return out[:limit] if _depth == 0 else out
 
 
-def _today_key() -> str:
-    return f"usage:calls:{date.today().isoformat()}"
+def _today_key(scope: str = "meta") -> str:
+    return f"usage:calls:{date.today().isoformat()}" if scope == "meta" else f"usage:calls:{scope}:{date.today().isoformat()}"
 
 
-def _reserve_call(r: redis.Redis) -> None:
+def _limit(scope: str) -> int:
+    return settings.max_llm_calls_per_day if scope == "meta" else settings.max_baseten_calls_per_day
+
+
+def _reserve_call(r: redis.Redis, scope: str = "meta") -> None:
     reserved = r.eval(
         "local count=tonumber(redis.call('GET', KEYS[1]) or '0') "
         "if count >= tonumber(ARGV[1]) then return 0 end "
@@ -107,19 +116,38 @@ def _reserve_call(r: redis.Redis) -> None:
         "redis.call('EXPIRE', KEYS[1], 259200) "
         "return next",
         1,
-        _today_key(),
-        settings.max_llm_calls_per_day,
+        _today_key(scope),
+        _limit(scope),
     )
     if not reserved:
-        raise CallBudgetExceeded("daily Meta API call budget exhausted")
+        raise CallBudgetExceeded(f"daily {scope} API call budget exhausted")
 
 
-def budget_ok(r: redis.Redis | None = None) -> bool:
+def split_models(spec: str) -> list[str]:
+    return [m.strip() for m in (spec or "").split("|") if m.strip()]
+
+
+def provider_of(spec: str) -> tuple[str, str]:
+    """('baseten', slug) for "baseten:<slug>", otherwise ('meta', model)."""
+    if spec.lower().startswith("baseten:"):
+        return "baseten", spec.split(":", 1)[1].strip()
+    return "meta", spec
+
+
+def _scope_ok(scope: str, r: redis.Redis) -> bool:
+    if scope == "baseten" and not settings.baseten_api_key:
+        return False
+    return int(r.get(_today_key(scope)) or 0) < _limit(scope)
+
+
+def budget_ok(r: redis.Redis | None = None, model: str | None = None) -> bool:
+    """True while at least one provider that could serve `model` (all providers when omitted) has calls left today."""
     r = r or redis_client()
-    return int(r.get(_today_key()) or 0) < settings.max_llm_calls_per_day
+    scopes = {provider_of(m)[0] for m in split_models(model)} if model else {"meta", "baseten"}
+    return any(_scope_ok(sc, r) for sc in scopes)
 
 
-def _record(model: str, usage: Any, r: redis.Redis) -> None:
+def _record(model: str, usage: Any, r: redis.Redis) -> None:  # `model` is the full spec, so Baseten usage is listed separately
     day = date.today().isoformat()
     pipe = r.pipeline()
     key = f"usage:{day}:{model}"
@@ -204,12 +232,73 @@ def _responses_call(model: str, messages: list[dict], max_tokens: int, reasoning
     return resp.json()
 
 
-def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700,
-              r: redis.Redis | None = None, reasoning: bool = True) -> dict:
+def to_openai_messages(messages: list[dict]) -> list[dict]:
+    """Chat messages (text / image_url / input_text / input_image parts) -> OpenAI chat-completions messages."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                t = part.get("type")
+                if t in ("text", "input_text", "output_text"):
+                    parts.append({"type": "text", "text": part.get("text", "")})
+                elif t in ("image_url", "input_image"):
+                    iu = part.get("image_url")
+                    parts.append({"type": "image_url", "image_url": {"url": iu.get("url") if isinstance(iu, dict) else iu}})
+            content = parts
+        out.append({"role": m.get("role", "user"), "content": content})
+    return out
+
+
+def extract_chat_text(data: dict) -> tuple[str, str | None]:
+    """(assistant text, finish_reason) from a chat-completions reply."""
+    choice = ((data.get("choices") or [{}])[0]) or {}
+    content = (choice.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    return (content or "").strip(), choice.get("finish_reason")
+
+
+def _baseten_call(slug: str, messages: list[dict], max_tokens: int, r: redis.Redis) -> dict:
+    """One POST to Baseten /chat/completions (counts against MAX_BASETEN_CALLS_PER_DAY)."""
+    _reserve_call(r, "baseten")
+    payload: dict = {"model": slug, "messages": to_openai_messages(messages), "max_tokens": max_tokens}
+    effort = os.getenv("BASETEN_REASONING_EFFORT", "").strip()
+    if effort:
+        payload["reasoning_effort"] = effort
+    resp = requests.post(settings.baseten_api_url.rstrip("/") + "/chat/completions", timeout=90, json=payload,
+                         headers={"Authorization": f"Bearer {settings.baseten_api_key}", "Content-Type": "application/json"})
+    if resp.status_code != 200:
+        log.error("Baseten API Error %s: %s", resp.status_code, resp.text[:500])
+        resp.raise_for_status()
+    return resp.json()
+
+
+def _chat_json_baseten(spec: str, slug: str, messages: list[dict], max_tokens: int, r: redis.Redis, reasoning: bool) -> dict:
+    budget = max_tokens + thinking_headroom(slug.split("/")[-1], reasoning)   # Muse reasons before answering here too
+    data = _baseten_call(slug, messages, budget, r)
+    text, finish = extract_chat_text(data)
+    if not text and finish == "length":
+        log.warning("%s ran out of tokens (%d) - retrying once with %d", slug, budget, budget * 2)
+        _record(spec, _chat_usage(data), r)
+        data = _baseten_call(slug, messages, budget * 2, r)
+        text, finish = extract_chat_text(data)
+    if not text:
+        log.error("Baseten returned no text (model=%s) shape: %s", slug, describe_shape(data))
+        raise NoOutputText(f"{slug} returned no output text")
+    _record(spec, _chat_usage(data), r)
+    return parse_json(text)                       # Muse Spark Open has no JSON mode: the prompt asks for JSON, we parse tolerantly
+
+
+def _chat_usage(data: dict):
+    u = data.get("usage") or {}
+    return types.SimpleNamespace(prompt_tokens=u.get("prompt_tokens", 0), completion_tokens=u.get("completion_tokens", 0))
+
+
+def _chat_json_meta(model: str, messages: list[dict], max_tokens: int, r: redis.Redis, reasoning: bool) -> dict:
     if not is_responses_api():
         raise RuntimeError("LLAMA_API_URL must point to the Meta Responses API")
-    r = r or redis_client()
-
     budget = max_tokens + thinking_headroom(model, reasoning)
     data = _responses_call(model, messages, budget, reasoning, r)
     text = extract_response_text(data)
@@ -224,3 +313,24 @@ def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700,
         raise NoOutputText(f"{model} returned no output text")
     _record(model, _usage(data), r)
     return parse_json(text)
+
+
+def chat_json(model: str, messages: list[dict], *, max_tokens: int = 700,
+              r: redis.Redis | None = None, reasoning: bool = True) -> dict:
+    """Try each model spec in `model` ("a|b|c") until one answers; the last error is raised when none does."""
+    r = r or redis_client()
+    last: Exception | None = None
+    for spec in split_models(model):
+        prov, name = provider_of(spec)
+        if prov == "baseten" and not settings.baseten_api_key:
+            last = last or RuntimeError("BASETEN_API_KEY is not set")
+            continue
+        try:
+            if prov == "baseten":
+                return _chat_json_baseten(spec, name, messages, max_tokens, r, reasoning)
+            return _chat_json_meta(name, messages, max_tokens, r, reasoning)
+        except Exception as exc:  # noqa: BLE001 - budget, HTTP error, empty answer: hand over to the next provider
+            last = exc
+            log.warning("model %s failed (%s: %s)%s", spec, type(exc).__name__, str(exc)[:160],
+                        " - trying the next one" if spec != split_models(model)[-1] else "")
+    raise last or RuntimeError("no model configured")

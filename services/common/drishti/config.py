@@ -43,6 +43,10 @@ class Settings:
         # --- Meta Responses API
         self.llama_api_key = _s("LLAMA_API_KEY")
         self.llama_api_url = _s("LLAMA_API_URL", "https://api.meta.ai/v1/responses")
+        # Baseten Model APIs (OpenAI-compatible). Use a model as "baseten:<slug>", e.g. SPARK_MODEL=baseten:meta-models/muse-spark-open-1026
+        self.baseten_api_key = _s("BASETEN_API_KEY")
+        self.baseten_api_url = _s("BASETEN_API_URL", "https://inference.baseten.co/v1")
+        self.max_baseten_calls_per_day = _i("MAX_BASETEN_CALLS_PER_DAY", 1500)
         self.sam_model = _s("SAM_MODEL", "sam-3.1")
         self.spark_model = _s("SPARK_MODEL", "muse-spark-1.3")
         self.wonder_model = _s("WONDER_MODEL", "muse-wonder-1.0")
@@ -51,7 +55,7 @@ class Settings:
 
         # MOCK_MODE=auto -> on whenever there is no API key, so a laptop demo "just works".
         mm = _s("MOCK_MODE", "auto").lower()
-        self.mock_mode = (not self.llama_api_key) if mm == "auto" else mm in {"1", "true", "yes", "on"}
+        self.mock_mode = (not (self.llama_api_key or self.baseten_api_key)) if mm == "auto" else mm in {"1", "true", "yes", "on"}
 
         # --- cost control (LOW_COST_MODE)
         self.low_cost_mode = _b("LOW_COST_MODE", True)
@@ -64,6 +68,8 @@ class Settings:
         # than CELL_DELTA grey levels vs the last analysed frame (brightness-normalised, so lamps / auto-exposure don't count)
         self.change_fraction = _f("CHANGE_FRACTION", 0.04)
         self.cell_delta = _i("CELL_DELTA", 14)
+        self.burst_fraction = _f("BURST_FRACTION", 0.15)             # a change this big (running, fight, fall) skips the long gap...
+        self.burst_gap_sec = _i("BURST_GAP_SEC", 45)                 # ...but never analyses the same camera more often than this
         self.min_analysis_gap_sec = _i("MIN_ANALYSIS_GAP_SEC", 60)   # a changed scene is analysed at most this often (PIR/force bypass)
 
         # --- gateway
@@ -97,6 +103,13 @@ class Settings:
         self.news_interval_sec = _i("NEWS_INTERVAL_SEC", 1800)
         self.ocr_verticals = _list("OCR_VERTICALS", "icu_hospital,school_children,mall_security")
         self.notify_webhook_url = _s("NOTIFY_WEBHOOK_URL")
+        # WhatsApp Business Cloud API (Meta). Alerts of every remote kind (whatsapp / call_family / notify_*) are sent as messages.
+        self.whatsapp_token = _s("WHATSAPP_TOKEN")
+        self.whatsapp_phone_id = _s("WHATSAPP_PHONE_ID")
+        self.whatsapp_to = _list("WHATSAPP_TO", "")                    # comma separated, international format without '+': 919876543210
+        self.whatsapp_template = _s("WHATSAPP_TEMPLATE")                # approved template with ONE body variable; empty = free text (24 h window)
+        self.whatsapp_template_lang = _s("WHATSAPP_TEMPLATE_LANG", "en_US")
+        self.whatsapp_api_version = _s("WHATSAPP_API_VERSION", "v21.0")
         self.graph_event_ttl_days = _i("GRAPH_EVENT_TTL_DAYS", 7)
         self.gateway_url = _s("GATEWAY_URL", "http://gateway:8000")
 

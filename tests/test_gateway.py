@@ -175,3 +175,50 @@ def test_notifications_roundtrip_and_dedupe(client, redis_c):
     assert client.post("/tenants/mall_1/notifications/read", json={"ids": "x"}).status_code == 422
     assert client.get("/tenants/ghost/notifications").status_code == 404
     assert client.get("/tenants/school_1/notifications").json()["items"] == []                   # tenant scoped
+
+
+def test_big_sudden_change_skips_the_long_gap_but_not_the_burst_gap(client, redis_c, monkeypatch):
+    import time
+    from drishti.config import settings
+    monkeypatch.setattr(settings, "min_analysis_gap_sec", 300)
+    monkeypatch.setattr(settings, "burst_gap_sec", 45)
+    monkeypatch.setattr(settings, "burst_fraction", 0.10)
+    redis_c.flushdb()
+    post = lambda jp: client.post("/ingest/mall_1", files={"file": ("f.jpg", jp, "image/jpeg")}).json()
+    assert post(_scene())["static"] is False
+    assert post(_scene(blob=(40, 20, 280, 220)))["static"] is True          # huge change, but analysed 0 s ago: burst gap holds it
+    redis_c.hset("scenehash:mall_1:cam_1", "analyzed_ts", str(time.time() - 60))
+    big = post(_scene(blob=(40, 20, 280, 220)))
+    assert big["static"] is False and big["change"] >= 0.10                  # 60 s > burst gap: analysed despite the 300 s gap
+    client.post("/ingest/mall_1", files={"file": ("f.jpg", _scene(), "image/jpeg")}, data={"force": "true"})   # empty room = baseline
+    redis_c.hset("scenehash:mall_1:cam_1", "analyzed_ts", str(time.time() - 60))
+    small = post(_scene(blob=(100, 80, 170, 130)))                          # ~5% of the picture: changed, but not a burst
+    assert settings.change_fraction < small["change"] < settings.burst_fraction and small["static"] is True  # waits for the long gap
+
+
+# --------------------------------------------------------------------------- dashboard-registered camera feeds
+def test_register_list_and_remove_camera_feed(client, redis_c):
+    redis_c.flushdb()
+    r = client.post("/tenants/school_1/feeds", json={"camera_id": "gate", "url": "rtsp://admin:s3cret@10.0.0.9/stream1"})
+    assert r.status_code == 201 and "s3cret" not in r.text
+    assert client.post("/tenants/school_1/feeds", json={"camera_id": "hall", "url": "http://192.168.1.7:8081/"}).status_code == 201
+    assert client.get("/tenants/school_1/feeds").json() == [
+        {"camera_id": "gate", "url": "rtsp://***@10.0.0.9/stream1"}, {"camera_id": "hall", "url": "http://192.168.1.7:8081/"}]
+    from drishti import bus
+    feeds = bus.registered_feeds()
+    assert {(f["tenant"], f["camera"], f["vertical"]) for f in feeds} == {("school_1", "gate", "school_children"), ("school_1", "hall", "school_children")}
+    assert feeds[0]["url"].startswith("rtsp://admin:s3cret@")                  # the ingestor needs the real credentials
+    assert client.get("/tenants/mall_1/feeds").json() == []                    # tenant scoped
+    assert client.delete("/tenants/school_1/feeds/gate").status_code == 200
+    assert client.delete("/tenants/school_1/feeds/gate").status_code == 404
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://x/y", "javascript:alert(1)", "/etc/passwd", "/app/feeds/../x.mp4",
+                                 "https://www.facebook.com/someone/live", "https://fb.watch/abc", "http://instagram.com/live"])
+def test_feed_url_validation_rejects_unsafe_or_unreadable_sources(client, url):
+    assert client.post("/tenants/mall_1/feeds", json={"camera_id": "c1", "url": url}).status_code == 422
+
+
+def test_feed_accepts_hls_and_local_mp4(client):
+    assert client.post("/tenants/mall_1/feeds", json={"camera_id": "hls", "url": "https://cdn.example.com/live/index.m3u8"}).status_code == 201
+    assert client.post("/tenants/mall_1/feeds", json={"camera_id": "mp4", "url": "/app/feeds/mall.mp4"}).status_code == 201
