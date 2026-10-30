@@ -39,7 +39,40 @@ def build_payload(kind: str, p: dict, alert_id: str) -> dict:
             "image_url": f"/alerts/{alert_id}/image" if p.get("has_proof") else None}
 
 
+def whatsapp_body(to: str, text: str) -> dict:
+    """Cloud API message: an approved template (works any time) when WHATSAPP_TEMPLATE is set, else free text (24 h window only)."""
+    text = text.replace("\n", " ")[:1000]
+    if settings.whatsapp_template:
+        return {"messaging_product": "whatsapp", "to": to, "type": "template",
+                "template": {"name": settings.whatsapp_template, "language": {"code": settings.whatsapp_template_lang},
+                             "components": [{"type": "body", "parameters": [{"type": "text", "text": text}]}]}}
+    return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text, "preview_url": False}}
+
+
+def deliver_whatsapp(payload: dict) -> str:
+    url = f"https://graph.facebook.com/{settings.whatsapp_api_version}/{settings.whatsapp_phone_id}/messages"
+    ok = 0
+    for to in settings.whatsapp_to:
+        try:
+            resp = httpx.post(url, timeout=15, headers={"Authorization": f"Bearer {settings.whatsapp_token}"},
+                              json=whatsapp_body(to, payload["message"]))
+            resp.raise_for_status()
+            ok += 1
+        except Exception as exc:  # noqa: BLE001
+            body = getattr(getattr(exc, "response", None), "text", "")[:200]
+            log.warning("WhatsApp to %s failed: %s %s", to[-4:], exc, body)
+    return "sent" if ok == len(settings.whatsapp_to) else ("partial" if ok else "failed")
+
+
+def whatsapp_enabled() -> bool:
+    return bool(settings.whatsapp_token and settings.whatsapp_phone_id and settings.whatsapp_to)
+
+
 def deliver_remote(kind: str, payload: dict, p: dict) -> str:
+    if whatsapp_enabled():
+        status = deliver_whatsapp(payload)
+        if status == "sent" or not settings.notify_webhook_url:
+            return status
     if not settings.notify_webhook_url:
         log.info("[notify:%s] %s", kind, payload["message"])
         return "logged"

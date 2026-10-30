@@ -67,7 +67,10 @@ def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | No
     level = str(out.get("level", "NORMAL")).upper()
     if level not in LEVELS:
         level = "NORMAL"
-    rule = out.get("rule") if out.get("rule") in VERTICALS[v]["rules"] else "llm_assessment"
+    rule = out.get("rule")
+    if isinstance(rule, str) and rules.norm_label(rule) == "violence":
+        rule = "physical_abuse"                       # 'fight', 'abuse', 'assault' ... all mean the one abuse rule
+    rule = rule if rule in VERTICALS[v]["rules"] else "llm_assessment"
     objs = [rules.norm_label(x) for x in out.get("objects", []) if isinstance(x, str)][:12]
     return {
         "level": level, "rule": rule, "reason": str(out.get("reason", ""))[:300],
@@ -87,8 +90,8 @@ def handle(p: dict, r) -> None:
         cached = r.get(last_key)
         if cached:
             llm_res, source = json.loads(cached), "cache"
-    elif not settings.mock_mode and llm.budget_ok(r):
-        gated = settings.low_cost_mode and not hits and not r.set(f"sparkgate:{tid}:{cam}", 1, nx=True, ex=settings.sample_interval_sec)
+    elif not settings.mock_mode and llm.budget_ok(r, settings.spark_model):
+        gated = settings.low_cost_mode and not hits and not r.set(f"sparkgate:{tid}:{cam}", 1, nx=True, ex=max(1, min(settings.sample_interval_sec, settings.min_analysis_gap_sec)))
         if not gated:
             jpeg = bus.get_frame(p["frame_id"])
             if jpeg is not None:

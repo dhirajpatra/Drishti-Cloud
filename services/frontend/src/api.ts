@@ -117,6 +117,7 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+export interface FeedInfo { camera_id: string; url: string }
 export interface CameraInfo { camera_id: string; updated_at: string | null }
 
 export const api = {
@@ -139,6 +140,11 @@ export const api = {
   notifications: (id: string) => json<NotificationList>(`/tenants/${encodeURIComponent(id)}/notifications?limit=30`),
   markNotificationsRead: (id: string, ids?: string[]) =>
     json<{ changed: number }>(`/tenants/${encodeURIComponent(id)}/notifications/read`, jsonInit("POST", ids ? { ids } : {})),
+  feeds: (id: string) => json<FeedInfo[]>(`/tenants/${encodeURIComponent(id)}/feeds`),
+  addFeed: (id: string, camera_id: string, url: string) =>
+    json<FeedInfo>(`/tenants/${encodeURIComponent(id)}/feeds`, jsonInit("POST", { camera_id, url })),
+  removeFeed: (id: string, cam: string) =>
+    json<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/feeds/${encodeURIComponent(cam)}`, { method: "DELETE" }),
   cameras: (id: string) => json<CameraInfo[]>(`/tenants/${encodeURIComponent(id)}/cameras`),
   cameraFrameBlob: async (id: string, cam: string): Promise<Blob> => {
     const res = await raw(`/tenants/${encodeURIComponent(id)}/cameras/${encodeURIComponent(cam)}/latest`);

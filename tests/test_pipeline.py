@@ -18,6 +18,10 @@ CASES = [  # tenant, sensors, expected level, expected rule
     ("icu_ward_1", {"pir": True, "_sim": {"hour": 14, "ocr": ["HR 132 ALARM"],
                                           "objects": [{"label": "monitor", "bbox": [0.05, 0.1, 0.3, 0.4]}]}},
      "CRITICAL", None),
+] + [  # physical abuse is an immediate CRITICAL in every vertical (SAM label 'fight' folds into 'violence')
+    (t, {"pir": True, "_sim": {"hour": 14, "objects": [{"label": "person", "count": 2}, {"label": "fight", "bbox": [0.3, 0.3, 0.7, 0.9]}]}},
+     "CRITICAL", "physical_abuse")
+    for t in ("mall_1", "home_1_bangalore", "school_1", "icu_ward_1")
 ]
 
 
@@ -34,7 +38,7 @@ def post(client, tenant, sensors, seed=0, **form):
                        data={"sensors": json.dumps(sensors), "force": "true", **form})
 
 
-@pytest.mark.parametrize("tenant,sensors,level,rule", CASES, ids=[c[0] for c in CASES])
+@pytest.mark.parametrize("tenant,sensors,level,rule", CASES, ids=[f"{c[0]}-{c[3] or c[2]}" for c in CASES])
 def test_hazard_becomes_alert(client, agents, redis_c, tenant, sensors, level, rule):
     redis_c.flushdb()  # fresh cooldowns / scene hashes
     r = post(client, tenant, sensors)
@@ -137,3 +141,12 @@ def test_alert_event_picture_falls_back_to_stored_proof(client, agents, redis_c)
     redis_c.delete(f"snap:{tenant}:{fid}")                      # snapshot expired ...
     img = client.get(f"/tenants/{tenant}/events/{fid}/image")   # ... the alert's persisted proof is still served
     assert img.status_code == 200
+
+
+def test_abuse_heard_in_audio_alerts_without_any_label(client, agents, redis_c):
+    redis_c.flushdb()
+    r = post(client, "home_1_bangalore", {"pir": True, "audio_transcript": "please stop hitting me", "_sim": {"hour": 14}})
+    frame_id = r.json()["frame_id"]
+    run_pipeline(redis_c, agents)
+    a = next(a for a in client.get("/tenants/home_1_bangalore/alerts").json() if a["frame_id"] == frame_id)
+    assert a["level"] == "CRITICAL" and a["rule"] == "physical_abuse"

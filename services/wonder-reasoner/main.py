@@ -79,7 +79,7 @@ def handle(p: dict, r) -> None:
         final, decision = "CRITICAL", "ESCALATED_NEWS"
         rationale = f"Escalated because of local news: '{headline}'. {rationale}".strip()
 
-    if level == "ALERT" and not settings.mock_mode and llm.budget_ok(r):
+    if level == "ALERT" and not settings.mock_mode and llm.budget_ok(r, settings.wonder_model):
         try:
             res = llm.chat_json(settings.wonder_model, [{"role": "user", "content": PROMPT.format(
                 tenant_id=tid, vertical=p["vertical"], level=level, rule=rule, reason=p.get("reason", ""), hour=hour,
