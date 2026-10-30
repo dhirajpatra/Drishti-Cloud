@@ -167,6 +167,21 @@ def dhash(img: Image.Image, size: int = 16) -> int:
     return bits
 
 
+GRID = (32, 24)
+
+
+def scene_signature(img: Image.Image) -> list[int]:
+    """32x24 area-averaged grey cells with the global brightness removed (lamps / auto-exposure shift every cell equally)."""
+    cells = list(img.convert("L").resize(GRID, Image.BOX).tobytes())
+    mean = sum(cells) / len(cells)
+    return [round(c - mean) for c in cells]
+
+
+def change_fraction(a: list[int], b: list[int], delta: int) -> float:
+    """Share of cells that moved by more than `delta` grey levels between two signatures."""
+    return sum(1 for x, y in zip(a, b) if abs(x - y) > delta) / len(a)
+
+
 @app.post("/ingest/{tenant_id}")
 def ingest(
     tenant_id: str,
@@ -209,19 +224,26 @@ def ingest(
 
     bus.put_latest(tenant_id, camera_id, jpeg)   # dashboard live view, independent of dedupe / analysis
 
-    # --- LOW_COST_MODE: static scene -> reuse cached segmentation / skip model calls
+    # --- LOW_COST_MODE: idle scene -> reuse cached analysis, no model call
     h = dhash(img)
+    sig = scene_signature(img)
     hkey = f"scenehash:{tenant_id}:{camera_id}"
     prev = r.hgetall(hkey)
     now = time.time()
     pir = sensor_data.get("pir")
-    static = False
-    if prev and not force:
-        dist = bin(h ^ int(prev["hash"])).count("1")
-        fresh = now - float(prev["analyzed_ts"]) < settings.force_refresh_sec
-        static = settings.low_cost_mode and dist <= settings.hash_distance and pir is not True and fresh
+    static, change = False, None
+    if prev and not force and settings.low_cost_mode and pir is not True:
+        age = now - float(prev["analyzed_ts"])
+        if prev.get("sig"):
+            change = change_fraction(sig, json.loads(prev["sig"]), settings.cell_delta)
+            changed = change > settings.change_fraction
+        else:  # entry written by an older version: fall back to the perceptual hash
+            changed = bin(h ^ int(prev["hash"])).count("1") > settings.hash_distance
+        # idle while nothing moved; also hold a changed scene back until the minimum gap since the last analysis has passed
+        # (the baseline stays put, so the change is picked up by the first sample after the gap)
+        static = age < settings.force_refresh_sec and (not changed or age < settings.min_analysis_gap_sec)
     if not static:
-        r.hset(hkey, mapping={"hash": str(h), "analyzed_ts": str(now)})
+        r.hset(hkey, mapping={"hash": str(h), "sig": json.dumps(sig), "analyzed_ts": str(now)})
         r.expire(hkey, 7 * 86400)
 
     frame_id = bus.new_id()
@@ -230,7 +252,8 @@ def ingest(
         "frame_id": frame_id, "tenant_id": tenant_id, "vertical": t["vertical"], "camera_id": camera_id,
         "ts": bus.utcnow_iso(), "sensors": sensor_data, "static": static, "scene_hash": f"{h:064x}",
     }, r)
-    return {"status": "queued", "frame_id": frame_id, "static": static}
+    return {"status": "queued", "frame_id": frame_id, "static": static,
+            "change": None if change is None else round(change, 3)}
 
 
 # --------------------------------------------------------------------------- read API
@@ -282,6 +305,22 @@ def event_image(tenant_id: str, frame_id: str, request: Request):
     if img is None:
         raise HTTPException(404, "no picture kept for this event (expired or never stored)")
     return Response(img, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.get("/tenants/{tenant_id}/notifications")
+def tenant_notifications(tenant_id: str, request: Request, limit: int = 50):
+    require_tenant(tenant_id, request)
+    rows = bus.notifications(tenant_id, max(1, min(limit, 100)))
+    return {"unread": sum(1 for n in rows if not n["read"]), "items": rows}
+
+
+@app.post("/tenants/{tenant_id}/notifications/read")
+def tenant_notifications_read(tenant_id: str, request: Request, body: dict = Body(default={})):
+    require_tenant(tenant_id, request)
+    ids = body.get("ids")
+    if ids is not None and not (isinstance(ids, list) and all(isinstance(i, str) for i in ids)):
+        raise HTTPException(422, "ids must be a list of strings (omit it to mark everything read)")
+    return {"changed": bus.notifications_read(tenant_id, ids)}
 
 
 @app.get("/tenants/{tenant_id}/actuations")

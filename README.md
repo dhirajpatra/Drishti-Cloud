@@ -316,6 +316,16 @@ agent escalates an ALERT to CRITICAL when a headline matches that rule's hazard 
 the legacy `newsapi.org` provider (`NEWS_PROVIDER=newsapi`), `NEWS_API_KEY` must be a valid NewsAPI.org key; a 401/403
 is reported as an authentication error and skips the current refresh.
 
+**Notifications (dashboard panel "Local news & alerts"):** a local headline that contains a hazard word (CRITICAL: bomb, blast,
+terror, stampede, riot, curfew ...; WARNING: flood, heavy rain, cyclone, power cut, fire, protest, strike ...) raises one
+notification per headline, and every confirmed ALERT/CRITICAL adds one too. Click an item to mark it read; the browser tab title
+shows `(n)` unread. API: `GET /tenants/{id}/notifications`, `POST /tenants/{id}/notifications/read` (`{"ids":[...]}` or `{}` for all).
+
+**Idle gate (saves tokens):** every sampled frame is compared locally with the last *analysed* one on a 32x24 grid with the overall
+brightness removed. If less than `CHANGE_FRACTION` (4 %) of the cells moved, nothing goes to Meta and the last assessment is reused.
+A changed scene is analysed at most every `MIN_ANALYSIS_GAP_SEC`; PIR, `force`, and `FORCE_REFRESH_SEC` always get through.
+The feed-ingestor log shows `static=True, change=0.007` per sample, so you can tune the threshold from real numbers.
+
 ### 5. Edge Pi Setup (Optional)
 ```bash
 # On Pi 5

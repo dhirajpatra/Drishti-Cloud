@@ -110,3 +110,68 @@ def test_latest_frame_visible_even_when_deduped(client):
     assert client.get("/tenants/mall_1/cameras/nope/latest").status_code == 404
     assert client.get("/tenants/mall_1/cameras/bad..id/latest").status_code in (404, 422)
     assert client.get("/tenants/ghost/cameras").status_code == 404
+
+
+# --------------------------------------------------------------------------- idle detection / notifications
+def _scene(brightness=0, blob=None, noise=0):
+    """Kitchen-like gradient scene; `blob` = (x0, y0, x1, y1) dark block (a person), `noise` = per-pixel jitter."""
+    import random
+    random.seed(1)
+    img = Image.new("RGB", (320, 240))
+    px = img.load()
+    for x in range(320):
+        for y in range(240):
+            v = 60 + x // 3 + y // 4 + brightness + (random.randint(-noise, noise) if noise else 0)
+            px[x, y] = (max(0, min(255, v)),) * 3
+    if blob:
+        for x in range(blob[0], blob[2]):
+            for y in range(blob[1], blob[3]):
+                px[x, y] = (5, 5, 5)
+    b = io.BytesIO()
+    img.save(b, "JPEG", quality=85)
+    return b.getvalue()
+
+
+def test_idle_gate_ignores_lighting_and_noise_but_not_a_person(client, redis_c, monkeypatch):
+    from drishti.config import settings
+    monkeypatch.setattr(settings, "min_analysis_gap_sec", 0)
+    redis_c.flushdb()
+    post = lambda jp, **kw: client.post("/ingest/mall_1", files={"file": ("f.jpg", jp, "image/jpeg")},
+                                        data={"sensors": json.dumps({"pir": False}), **kw}).json()
+    assert post(_scene())["static"] is False                              # baseline
+    assert post(_scene(brightness=25))["static"] is True                  # lamp switched on: every cell shifts equally
+    assert post(_scene(noise=6))["static"] is True                        # sensor noise
+    r = post(_scene(blob=(80, 60, 200, 200)))                             # a person-sized object appears
+    assert r["static"] is False and r["change"] > settings.change_fraction
+    assert post(_scene(blob=(80, 60, 200, 200)))["static"] is True        # ...and is the new baseline once analysed
+
+
+def test_changed_scene_is_held_until_min_gap(client, redis_c, monkeypatch):
+    from drishti.config import settings
+    monkeypatch.setattr(settings, "min_analysis_gap_sec", 120)
+    redis_c.flushdb()
+    post = lambda jp, **kw: client.post("/ingest/mall_1", files={"file": ("f.jpg", jp, "image/jpeg")}, data=kw).json()
+    assert post(_scene())["static"] is False
+    held = post(_scene(blob=(80, 60, 200, 200)))
+    assert held["static"] is True and held["change"] > settings.change_fraction   # changed, but analysed < 120 s ago
+    assert post(_scene(blob=(80, 60, 200, 200)), force="true")["static"] is False  # force always goes through
+    redis_c.hset("scenehash:mall_1:cam_1", "analyzed_ts", str(__import__("time").time() - 200))
+    assert post(_scene(blob=(10, 10, 120, 120)))["static"] is False               # gap over -> analysed
+
+
+def test_notifications_roundtrip_and_dedupe(client, redis_c):
+    from drishti import bus
+    redis_c.flushdb()
+    assert client.get("/tenants/mall_1/notifications").json() == {"unread": 0, "items": []}
+    a = bus.notify("mall_1", "news", "WARNING", "Local news (Pune): flood alert", "The Hindu", key="k1")
+    assert bus.notify("mall_1", "news", "WARNING", "Local news (Pune): flood alert", key="k1") is None   # same headline once
+    bus.notify("mall_1", "alert", "CRITICAL", "CRITICAL: bag", key="a1")
+    body = client.get("/tenants/mall_1/notifications").json()
+    assert body["unread"] == 2 and [n["kind"] for n in body["items"]] == ["alert", "news"]       # newest first
+    assert client.post("/tenants/mall_1/notifications/read", json={"ids": [a["id"]]}).json() == {"changed": 1}
+    assert client.get("/tenants/mall_1/notifications").json()["unread"] == 1
+    assert client.post("/tenants/mall_1/notifications/read", json={}).json() == {"changed": 1}
+    assert client.get("/tenants/mall_1/notifications").json()["unread"] == 0
+    assert client.post("/tenants/mall_1/notifications/read", json={"ids": "x"}).status_code == 422
+    assert client.get("/tenants/ghost/notifications").status_code == 404
+    assert client.get("/tenants/school_1/notifications").json()["items"] == []                   # tenant scoped

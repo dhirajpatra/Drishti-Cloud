@@ -237,3 +237,22 @@ def test_outage_does_not_switch_the_filter_off(monkeypatch):
     with pytest.raises(httpx.HTTPStatusError):
         nc.scan_country(1)
     assert nc._published_after_ok is True
+
+
+# --------------------------------------------------------------------------------------------- hazard notifications
+def test_hazard_classification():
+    assert nc.hazard("Bomb threat at Bengaluru mall")[0] == "CRITICAL"
+    assert nc.hazard("Heavy rain: waterlogging in Bengaluru")[0] == "WARNING"
+    assert nc.hazard("Bengaluru power cut tonight in HSR Layout") == ("WARNING", "power cut")
+    assert nc.hazard("Bengaluru startup raises funding") is None
+    assert nc.hazard("Firefly wins award") is None                      # word boundaries: 'fire' is not 'Firefly'
+
+
+def test_only_local_hazards_notify_once(monkeypatch):
+    sent = []
+    monkeypatch.setattr(nc.bus, "notify", lambda tid, kind, level, title, detail, url, key, **kw: sent.append((tid, level, title, key)) or {"id": key})
+    items = [{"headline": "Bengaluru flood warning", "source": "The Hindu", "url": "u", "ts": ""},
+             {"headline": "Bomb threat in Delhi school", "source": "NDTV (national)", "url": None, "ts": ""},
+             {"headline": "Bengaluru metro opens", "source": "The Hindu", "url": None, "ts": ""}]
+    assert nc.notify_hazards("home_1", "Bengaluru", items) == 1
+    assert sent[0][:2] == ("home_1", "WARNING") and "Bengaluru flood warning" in sent[0][2]

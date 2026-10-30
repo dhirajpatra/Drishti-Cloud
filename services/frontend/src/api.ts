@@ -44,7 +44,12 @@ export interface VerticalStats {
   vertical: string; tenants: number; events_24h: number; alerts_24h: number; critical_24h: number;
   by_level: { NORMAL: number; ALERT: number; CRITICAL: number };
 }
-export interface IngestResult { status: "queued"; frame_id: string; static: boolean }
+export interface IngestResult { status: "queued"; frame_id: string; static: boolean; change?: number | null }
+export interface Notification {
+  id: string; ts: string; kind: "news" | "alert" | string; level: "CRITICAL" | "WARNING" | "INFO";
+  title: string; detail: string; url: string | null; read: boolean;
+}
+export interface NotificationList { unread: number; items: Notification[] }
 export interface Usage { date: string; models: Record<string, Record<string, number>> }
 
 export class ApiError extends Error {
@@ -131,6 +136,9 @@ export const api = {
     const res = await raw(`/alerts/${encodeURIComponent(alertId)}/image`);
     return res.blob();
   },
+  notifications: (id: string) => json<NotificationList>(`/tenants/${encodeURIComponent(id)}/notifications?limit=30`),
+  markNotificationsRead: (id: string, ids?: string[]) =>
+    json<{ changed: number }>(`/tenants/${encodeURIComponent(id)}/notifications/read`, jsonInit("POST", ids ? { ids } : {})),
   cameras: (id: string) => json<CameraInfo[]>(`/tenants/${encodeURIComponent(id)}/cameras`),
   cameraFrameBlob: async (id: string, cam: string): Promise<Blob> => {
     const res = await raw(`/tenants/${encodeURIComponent(id)}/cameras/${encodeURIComponent(cam)}/latest`);
