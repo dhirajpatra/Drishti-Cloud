@@ -70,8 +70,40 @@ def test_motion_trigger_grabs_the_named_feed_with_pir_true(monkeypatch, redis_c)
     bus.put_feed("school_1", "gate", "school_children", "rtsp://gate/1", redis_c)
     env = fi.parse_feeds("home_1_bangalore:home_seniors:kitchen=http://192.168.1.4:8081/")
     pushed = []
-    monkeypatch.setattr(fi, "push", lambda feed, sensors=None: pushed.append((feed["camera"], sensors)))
+    monkeypatch.setattr(fi, "push", lambda feed, sensors=None, burst=1: pushed.append((feed["camera"], sensors)))
     assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "kitchen"}), env) is True
     assert fi.handle_trigger(json.dumps({"tenant": "school_1", "camera": "gate"}), env) is True      # dashboard-registered camera
     assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "attic"}), env) is False
     assert pushed == [("kitchen", {"source": "motioneye_hook", "pir": True}), ("gate", {"source": "motioneye_hook", "pir": True})]
+
+
+def test_burst_posts_the_newest_frame_as_main_and_earlier_ones_as_burst(monkeypatch):
+    seq = iter([b"f0", b"f1", b"f2", b"f3"])
+    monkeypatch.setattr(fi, "grab", lambda feed: next(seq))
+    monkeypatch.setattr(fi.time, "sleep", lambda s: None)
+    sent = {}
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return {"static": False, "change": None}
+
+    monkeypatch.setattr(fi.httpx, "post", lambda url, **kw: sent.update(kw) or R())
+    fi.push({"tenant": "t", "camera": "c", "url": "http://x/"}, {"pir": True}, burst=4)
+    names = [(f[0], f[1][1]) for f in sent["files"]]
+    assert names == [("file", b"f3"), ("burst", b"f0"), ("burst", b"f1"), ("burst", b"f2")]
+
+
+def test_missed_frames_in_a_burst_do_not_lose_the_rest(monkeypatch):
+    seq = iter([b"a", RuntimeError("blip"), b"c"])
+
+    def grab(feed):
+        v = next(seq)
+        if isinstance(v, Exception):
+            raise v
+        return v
+
+    monkeypatch.setattr(fi, "grab", grab)
+    monkeypatch.setattr(fi.time, "sleep", lambda s: None)
+    assert fi.grab_burst({"tenant": "t", "camera": "c", "url": "u"}, 3, 0.1) == [b"a", b"c"]

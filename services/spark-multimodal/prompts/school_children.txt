@@ -6,3 +6,5 @@ Normal: queues at assembly, children walking with a teacher, staff at the gate, 
 A stranger without a badge near children is CRITICAL. Do not describe children's faces or identities.
 
 Any adult or child hitting, kicking, slapping, shoving or dragging a child is CRITICAL immediately: set rule=physical_abuse and add a 'violence' object. Play-fighting during break is ALERT at most unless someone is clearly being hurt.
+
+Also: someone climbing the fence (fence_climbing, ALERT) or a child walking out of the gate alone (child_leaving_unescorted, ALERT); visible fire/smoke (fire_smoke) or a weapon (weapon_visible) is CRITICAL; a child collapsed or convulsing is CRITICAL (medical_distress). Sports equipment is not a weapon.

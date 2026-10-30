@@ -150,3 +150,54 @@ def test_abuse_heard_in_audio_alerts_without_any_label(client, agents, redis_c):
     run_pipeline(redis_c, agents)
     a = next(a for a in client.get("/tenants/home_1_bangalore/alerts").json() if a["frame_id"] == frame_id)
     assert a["level"] == "CRITICAL" and a["rule"] == "physical_abuse"
+
+
+# --------------------------------------------------------------------------- universal hazards and camera health
+@pytest.mark.parametrize("tenant,label,rule", [("mall_1", "gun", "weapon_visible"), ("home_1_bangalore", "flame", "fire_smoke"),
+                                               ("school_1", "smoke", "fire_smoke"), ("icu_ward_1", "weapon", "weapon_visible")])
+def test_fire_and_weapon_are_critical_in_every_vertical(client, agents, redis_c, tenant, label, rule):
+    redis_c.flushdb()
+    r = post(client, tenant, {"pir": True, "_sim": {"hour": 14, "objects": [{"label": label, "bbox": [0.3, 0.3, 0.6, 0.7]}]}})
+    frame_id = r.json()["frame_id"]
+    run_pipeline(redis_c, agents)
+    a = next(a for a in client.get(f"/tenants/{tenant}/alerts").json() if a["frame_id"] == frame_id)
+    assert a["level"] == "CRITICAL" and a["rule"] == rule
+
+
+def _plain(color):
+    img = Image.new("RGB", (640, 480), color)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def test_covered_camera_raises_one_alert_and_a_restore_notice(client, agents, redis_c):
+    redis_c.flushdb()
+    up = lambda jp: client.post("/ingest/school_1", files={"file": ("f.jpg", jp, "image/jpeg")}, data={"camera_id": "gate"}).json()
+    assert up(jpeg(1))["static"] is False                       # normal picture first
+    black = up(_plain((0, 0, 0)))                               # lens covered -> analysed even though 'idle' rules would skip it
+    assert black["static"] is False
+    run_pipeline(redis_c, agents)
+    alerts = [a for a in client.get("/tenants/school_1/alerts").json() if a["rule"] == "camera_obstructed"]
+    assert len(alerts) == 1 and alerts[0]["level"] == "ALERT"
+    up(_plain((0, 0, 0)))                                       # still covered: same state, no second alert
+    run_pipeline(redis_c, agents)
+    assert len([a for a in client.get("/tenants/school_1/alerts").json() if a["rule"] == "camera_obstructed"]) == 1
+    up(jpeg(2))                                                 # picture back
+    assert any("back" in n["title"] for n in client.get("/tenants/school_1/notifications").json()["items"])
+
+
+def test_dim_scene_is_brightened_for_the_models_only(client, redis_c):
+    from drishti import bus
+    redis_c.flushdb()
+    dim = Image.new("RGB", (320, 240))
+    px = dim.load()
+    for x in range(320):
+        for y in range(240):
+            px[x, y] = (10 + x // 8, 12 + y // 8, 14)
+    b = io.BytesIO(); dim.save(b, "JPEG")
+    r = client.post("/ingest/home_1_bangalore", files={"file": ("f.jpg", b.getvalue(), "image/jpeg")}, data={"camera_id": "bed"})
+    model_view = Image.open(io.BytesIO(bus.get_frame(r.json()["frame_id"]))).convert("L")
+    live = Image.open(io.BytesIO(bus.get_latest("home_1_bangalore", "bed"))).convert("L")
+    mean = lambda im: sum(im.tobytes()) / len(im.tobytes())
+    assert mean(model_view) > mean(live) + 20                   # models get the brightened picture, the dashboard the true one

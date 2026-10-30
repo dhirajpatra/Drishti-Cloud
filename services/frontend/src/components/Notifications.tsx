@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, CheckCheck, Newspaper, ShieldAlert } from "lucide-react";
+import { Bell, CheckCheck, Newspaper, ShieldAlert, VideoOff } from "lucide-react";
 import { api, type Notification } from "../api";
 import { relTime, useNow, usePoll } from "../lib";
 import { Empty, ErrorLine, Panel, Pill, btnGhost } from "./ui";
@@ -26,7 +26,7 @@ export function Notifications({ tenantId }: { tenantId: string }) {
 
   const items: Notification[] = list.data?.items ?? [];
   return (
-    <Panel kicker="NOTIFICATIONS" title="Local news &amp; alerts"
+    <Panel kicker="NOTIFICATIONS" title="Local news, alerts &amp; camera health"
       right={
         <div className="flex items-center gap-2">
           <span className="mono text-[11px] flex items-center gap-1.5" style={{ color: unread ? COLOR.WARNING : "var(--muted)" }}>
@@ -46,7 +46,7 @@ export function Notifications({ tenantId }: { tenantId: string }) {
         <ul className="space-y-2 max-h-72 overflow-y-auto pr-1">
           {items.map((n) => {
             const c = COLOR[n.level] ?? COLOR.INFO;
-            const Icon = n.kind === "news" ? Newspaper : ShieldAlert;
+            const Icon = n.kind === "news" ? Newspaper : n.kind === "camera" ? VideoOff : ShieldAlert;
             return (
               <li key={n.id} onClick={() => !n.read && markRead([n.id])} className="rounded-lg border p-2.5 flex gap-2.5 cursor-pointer"
                 style={{ borderColor: n.read ? "var(--line)" : c, opacity: n.read ? 0.55 : 1, background: n.read ? "transparent" : "#0b1424" }}>

@@ -23,6 +23,7 @@ CORE_PROMPT = """You are Drishti Guard for vertical {vertical} for tenant {tenan
 IMAGES: {masks}
 VIDEO: motion={pir}, distance_front={us_front}cm, distance_door={us_door}cm, gesture={gesture}, temp={temp}C
 TEXT: OCR={ocr}, Audio Transcript={audio}
+PICTURE: {picture_note}
 DOCS: Safety SOP:
 {sop}
 
@@ -33,6 +34,18 @@ Decide: NORMAL, ALERT, CRITICAL. Explain the reason. List the objects involved.
 Return JSON only: {{"level":"NORMAL|ALERT|CRITICAL","rule":"<one allowed rule id or llm_assessment>",
 "reason":"<one short sentence>","rationale":"<2-3 sentences citing the SOP>","objects":["<labels>"],
 "speak_text":"<short sentence to say aloud at the scene>"}}"""
+
+
+def picture_note(p: dict) -> str:
+    """What a guard would notice about the picture itself; makes the model cautious when it cannot see well."""
+    q, notes = p.get("quality") or {}, []
+    if q.get("enhanced"):
+        notes.append("dim scene, digitally brightened: faces and small objects are unreliable, prefer ALERT over CRITICAL unless clear")
+    if q.get("sharpness") is not None and q["sharpness"] < 15:
+        notes.append("picture is blurry")
+    if p.get("storyboard"):
+        notes.append(p["storyboard"])
+    return "; ".join(notes) or "normal"
 
 
 def guidance(vertical: str) -> str:
@@ -57,7 +70,7 @@ def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | No
     masks = [f"{o['label']}@{[round(x, 2) for x in o['bbox']]}" for o in (p.get("objects") or [])[:40]]
     prompt = CORE_PROMPT.format(
         vertical=v, tenant_id=p["tenant_id"], masks=", ".join(masks) or "none", pir=s.get("pir"),
-        us_front=s.get("us_front"), us_door=s.get("us_door"), gesture=s.get("gesture"), temp=s.get("temp"),
+        picture_note=picture_note(p), us_front=s.get("us_front"), us_door=s.get("us_door"), gesture=s.get("gesture"), temp=s.get("temp"),
         ocr=p.get("ocr_texts") or [], audio=str(s.get("audio_transcript") or "")[:200], sop=sop(v),
         guidance=guidance(v), hour=hour, findings=[h["rule"] for h in hits] or "none",
         rule_ids=VERTICALS[v]["rules"],
@@ -68,8 +81,8 @@ def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | No
     if level not in LEVELS:
         level = "NORMAL"
     rule = out.get("rule")
-    if isinstance(rule, str) and rules.norm_label(rule) == "violence":
-        rule = "physical_abuse"                       # 'fight', 'abuse', 'assault' ... all mean the one abuse rule
+    if isinstance(rule, str):                         # 'fight', 'flame', 'gun' ... fold into the one rule id for that hazard
+        rule = {"violence": "physical_abuse", "fire": "fire_smoke", "smoke": "fire_smoke", "weapon": "weapon_visible"}.get(rules.norm_label(rule), rule)
     rule = rule if rule in VERTICALS[v]["rules"] else "llm_assessment"
     objs = [rules.norm_label(x) for x in out.get("objects", []) if isinstance(x, str)][:12]
     return {
@@ -93,7 +106,7 @@ def handle(p: dict, r) -> None:
     elif not settings.mock_mode and llm.budget_ok(r, settings.spark_model):
         gated = settings.low_cost_mode and not hits and not r.set(f"sparkgate:{tid}:{cam}", 1, nx=True, ex=max(1, min(settings.sample_interval_sec, settings.min_analysis_gap_sec)))
         if not gated:
-            jpeg = bus.get_frame(p["frame_id"])
+            jpeg = (bus.get_story(p["frame_id"]) if p.get("storyboard") else None) or bus.get_frame(p["frame_id"])
             if jpeg is not None:
                 try:
                     llm_res, source = ask_spark(p, jpeg, hits, hour, r), "spark"

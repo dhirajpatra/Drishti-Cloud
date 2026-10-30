@@ -100,6 +100,35 @@ def get_snapshot(tenant_id: str, frame_id: str) -> bytes | None:
     return redis_bin().get(f"snap:{tenant_id}:{frame_id}")
 
 
+def put_hires(frame_id: str, jpeg: bytes) -> None:
+    """Larger copy of an analysed frame (<=1280x960) so OCR can 'lean in' on a monitor or sign instead of reading a 640x480 blur."""
+    redis_bin().set(f"hires:{frame_id}", jpeg, ex=settings.frame_ttl_sec)
+
+
+def get_hires(frame_id: str) -> bytes | None:
+    return redis_bin().get(f"hires:{frame_id}")
+
+
+def put_story(frame_id: str, jpeg: bytes) -> None:
+    """Storyboard (before / burst / now panels) for a frame that is going to be analysed."""
+    redis_bin().set(f"story:{frame_id}", jpeg, ex=settings.frame_ttl_sec)
+
+
+def get_story(frame_id: str) -> bytes | None:
+    return redis_bin().get(f"story:{frame_id}")
+
+
+def put_baseline(tenant_id: str, camera_id: str, jpeg: bytes) -> None:
+    """The last analysed picture of a camera: the 'before' panel of the next storyboard."""
+    redis_bin().set(f"baseline:{tenant_id}:{camera_id}", jpeg, ex=3600)
+
+
+def get_baseline(tenant_id: str, camera_id: str) -> tuple[bytes | None, float | None]:
+    jpeg = redis_bin().get(f"baseline:{tenant_id}:{camera_id}")
+    ttl = redis_bin().ttl(f"baseline:{tenant_id}:{camera_id}")
+    return jpeg, (3600 - ttl if jpeg and ttl and ttl > 0 else None)      # seconds since it was stored
+
+
 def put_proof(frame_id: str, jpeg: bytes) -> None:
     redis_bin().set(f"proof:{frame_id}", jpeg, ex=settings.frame_ttl_sec)
 
