@@ -21,7 +21,7 @@ scene, remembers what is normal for *this* home, school, mall or ICU, and speaks
 | **Problem** | One guard watches 20 CCTV screens and misses almost everything. A senior alone at home, a child at a school gate, a patient in an ICU bed: nobody is watching continuously. |
 | **What Drishti does** | Turns any ordinary camera (motionEye, RTSP, phone, ESP32-CAM) into a vigilant assistant for **home seniors, schools, malls and ICU wards**: falls, physical abuse and fights, unattended bags, strangers, patient out of bed, monitor alarms, stove left on, and more. |
 | **What is different** | (1) **Six cooperating agents** on a Redis bus, not one prompt. (2) **A per-site memory** (Neo4j habit graph) so "Dad naps at 3 pm" is not an alarm. (3) **World context**: local news can raise an alert's severity. (4) **Cost discipline**: the model is called only when the picture meaningfully changes, so it runs on a hobby budget. |
-| **Meta technology used** | Muse Spark (vision + decisions), Muse Wonder (reasoning over memory and news), SAM 3.1 (segmentation), Muse Image (annotated proof), Meta Responses API, **Muse Spark Open on Baseten** (hackathon credits, with automatic fallback), **WhatsApp Business Cloud API** (alerts), built and extended with **Muse Code** (`SKILL.md`). |
+| **Meta technology used** | Muse Spark (vision + decisions), Muse Wonder (reasoning over memory and news), SAM 3.1 (segmentation), Meta Responses API, **Muse Spark Open on Baseten** (hackathon credits, with automatic fallback), **WhatsApp Business Cloud API** (alerts), built and extended with **Muse Code** (`SKILL.md`). |
 | **Runs how** | `docker compose up -d` on a laptop today, the same file on any cloud later. **No API key needed to try it**: it starts in an offline `MOCK_MODE` with a built-in simulator. |
 | **Verified** | 91 automated tests (whole six-agent pipeline end to end, in mock mode, plus gateway, cost-control, news, Baseten routing, WhatsApp, motion hook). Also running against a real motionEye camera, Meta Responses API, Neo4j and freenewsapi.io. |
 
@@ -60,7 +60,7 @@ monitor alarm (ICU), each with an annotated proof picture and the spoken line th
 - **Messages**: **WhatsApp Business Cloud API (Meta)** to family / security / admin / nurse station, with a Slack-compatible webhook as fallback.
 - **Dashboard notification centre**: local-news hazards (flood, power cut, bomb threat, stampede...) and every confirmed alert, unread counts,
   tab-title badge.
-- **Annotated proof image** on every alert, kept for review.
+- **Annotated proof image** on every alert, kept for review. It is drawn locally (boxes and labels), so it costs no model call.
 
 ### Costs almost nothing to run (the hackathon-grade engineering)
 | Mechanism | What it does |
@@ -104,7 +104,7 @@ flowchart LR
   GW --> UI
 ```
 
-The model providers behind `SAM`, `OCR`, `Spark`, `Wonder` and `Image`: **Meta Responses API** and/or **Baseten** (see [Models](#models-and-providers)).
+The model providers behind `SAM`, `OCR`, `Spark` and `Wonder`: **Meta Responses API** and/or **Baseten** (see [Models](#models-and-providers)).
 
 | Service | Role |
 |---|---|
@@ -114,7 +114,7 @@ The model providers behind `SAM`, `OCR`, `Spark`, `Wonder` and `Image`: **Meta R
 | **ocr-reader** | Reads ICU monitors, gate signs, notices. Runs only when a text-bearing object is in view (or ICU). |
 | **spark-multimodal** | Fuses image, masks, sensors, OCR, audio and SOP; merges rule-engine findings with the model's judgement. |
 | **wonder-reasoner** | Uses the habit graph, recent events and local news to confirm, suppress or escalate. |
-| **image-alert** | Draws the proof picture (red boxes) and keeps a small snapshot of every analysed frame for the timeline. |
+| **image-alert** | Draws the proof picture (red boxes, locally, no model call) and keeps a small snapshot of every analysed frame for the timeline. |
 | **action-agent** | Persists events/alerts, de-duplicates by cooldown, chooses actuations per vertical policy, sends WhatsApp, writes dashboard notifications. |
 | **news-context** | Timer-driven: local headlines per tenant city into the graph; raises hazard notifications. |
 | **frontend** | Live cameras, alert feed with proof pictures, event timeline with pictures, notifications, camera sources, knowledge graph, usage. |
@@ -143,7 +143,6 @@ Each vertical is a SOP document + a prompt file (`services/spark-multimodal/prom
 | Segmentation | `sam-3.1` (Meta) | Auto-fallback to the Spark vision model for an hour if it returns no usable text (`SAM_MODE`). |
 | Vision decision | `muse-spark-1.3` (Meta) | Or `baseten:meta-models/muse-spark-open-1026` first, Meta second. |
 | Reasoning | `muse-wonder-1.0` (Meta) | Runs only for ALERTs; never lowers a CRITICAL. |
-| Proof image | `muse-image` (Meta) | Annotated proof with boxes. |
 | OCR | `muse-spark-1.3` or Baseten | |
 
 `MODEL=a|b|c` tries each in order; missing key, exhausted daily budget, HTTP error or empty answer moves to the next. Baseten usage is counted
@@ -262,7 +261,7 @@ python pi_edge.py --tenant_id home_1_bangalore --vertical home_seniors --gateway
 ---
 
 ## Hackathon checklist
-- [x] Muse Spark, Muse Wonder, Muse Image and SAM 3.1 via the Meta Model API (Responses API)
+- [x] Muse Spark, Muse Wonder and SAM 3.1 via the Meta Model API (Responses API); proof images are drawn locally (Muse Image is not called yet)
 - [x] Open weights via **Baseten** (Muse Spark Open) with automatic fallback to Meta
 - [x] **Meta WhatsApp Business Cloud API** for alerts
 - [x] Muse Code (`SKILL.md` + this repo built with it)
