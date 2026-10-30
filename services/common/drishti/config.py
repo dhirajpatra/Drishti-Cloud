@@ -60,6 +60,11 @@ class Settings:
         self.sample_interval_sec = _i("SAMPLE_INTERVAL_SEC", 30)
         self.hash_distance = _i("HASH_DISTANCE", 6)          # dhash bits that may differ = "same scene"
         self.force_refresh_sec = _i("FORCE_REFRESH_SEC", 900)  # periodically re-analyse an unchanged scene
+        # idle detection: a frame is "idle" (never sent to a model) while < CHANGE_FRACTION of its 32x24 cells moved by more
+        # than CELL_DELTA grey levels vs the last analysed frame (brightness-normalised, so lamps / auto-exposure don't count)
+        self.change_fraction = _f("CHANGE_FRACTION", 0.04)
+        self.cell_delta = _i("CELL_DELTA", 14)
+        self.min_analysis_gap_sec = _i("MIN_ANALYSIS_GAP_SEC", 60)   # a changed scene is analysed at most this often (PIR/force bypass)
 
         # --- gateway
         self.auth_required = _b("AUTH_REQUIRED", False)

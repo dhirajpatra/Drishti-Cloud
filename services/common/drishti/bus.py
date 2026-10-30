@@ -108,6 +108,49 @@ def get_proof(frame_id: str) -> bytes | None:
     return redis_bin().get(f"proof:{frame_id}")
 
 
+# ------------------------------------------------------------------ dashboard notifications
+NOTIF_KEEP = 100
+
+
+def notify(tenant_id: str, kind: str, level: str, title: str, detail: str = "", url: str | None = None,
+           key: str | None = None, r: redis.Redis | None = None) -> dict | None:
+    """Dashboard notification (newest first, last 100 per tenant). `key` de-duplicates: the same (kind, key) is shown once per 48 h."""
+    r = r or redis_client()
+    if key and not r.set(f"notifseen:{tenant_id}:{kind}:{key}", 1, nx=True, ex=48 * 3600):
+        return None
+    n = {"id": new_id(), "ts": utcnow_iso(), "kind": kind, "level": level, "title": title[:200], "detail": detail[:400],
+         "url": url, "read": False}
+    k = f"notif:{tenant_id}"
+    r.lpush(k, json.dumps(n))
+    r.ltrim(k, 0, NOTIF_KEEP - 1)
+    r.expire(k, 7 * 86400)
+    return n
+
+
+def notifications(tenant_id: str, limit: int = 50, r: redis.Redis | None = None) -> list[dict]:
+    r = r or redis_client()
+    return [json.loads(x) for x in r.lrange(f"notif:{tenant_id}", 0, max(1, limit) - 1)]
+
+
+def notifications_read(tenant_id: str, ids: list[str] | None = None, r: redis.Redis | None = None) -> int:
+    """Mark the given notifications (or all when ids is None) as read; returns how many changed."""
+    r = r or redis_client()
+    k = f"notif:{tenant_id}"
+    rows = [json.loads(x) for x in r.lrange(k, 0, -1)]
+    changed = 0
+    for n in rows:
+        if not n["read"] and (ids is None or n["id"] in ids):
+            n["read"], changed = True, changed + 1
+    if changed:
+        pipe = r.pipeline()
+        pipe.delete(k)
+        for n in reversed(rows):
+            pipe.lpush(k, json.dumps(n))
+        pipe.expire(k, 7 * 86400)
+        pipe.execute()
+    return changed
+
+
 # ------------------------------------------------------------------ rate limit
 def allow(key: str, limit: int, window_sec: int, r: redis.Redis | None = None) -> bool:
     """Fixed-window counter. True while under `limit` hits per window."""

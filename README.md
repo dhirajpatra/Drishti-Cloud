@@ -307,6 +307,16 @@ A harmless `IN_CONTEXT ... not available` warning in the gateway log just means 
 `docker compose logs news-context --tail=20` (look for `news for home_1_bangalore (Bengaluru): 5 item(s)`). The Wonder
 agent escalates an ALERT to CRITICAL when a headline matches that rule's hazard words (e.g. bomb, riot, flood).
 
+**Notifications (dashboard panel "Local news & alerts"):** a local headline that contains a hazard word (CRITICAL: bomb, blast,
+terror, stampede, riot, curfew ...; WARNING: flood, heavy rain, cyclone, power cut, fire, protest, strike ...) raises one
+notification per headline, and every confirmed ALERT/CRITICAL adds one too. Click an item to mark it read; the browser tab title
+shows `(n)` unread. API: `GET /tenants/{id}/notifications`, `POST /tenants/{id}/notifications/read` (`{"ids":[...]}` or `{}` for all).
+
+**Idle gate (saves tokens):** every sampled frame is compared locally with the last *analysed* one on a 32x24 grid with the overall
+brightness removed. If less than `CHANGE_FRACTION` (4 %) of the cells moved, nothing goes to Meta and the last assessment is reused.
+A changed scene is analysed at most every `MIN_ANALYSIS_GAP_SEC`; PIR, `force`, and `FORCE_REFRESH_SEC` always get through.
+The feed-ingestor log shows `static=True, change=0.007` per sample, so you can tune the threshold from real numbers.
+
 ### 5. Edge Pi Setup (Optional)
 ```bash
 # On Pi 5

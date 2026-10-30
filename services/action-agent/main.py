@@ -88,6 +88,11 @@ def handle(p: dict, r) -> None:
             else:
                 status = deliver_remote(kind, payload, p)
                 db.save_actuation(tid, alert_id, kind, payload, status)
+        try:
+            bus.notify(tid, "alert", "CRITICAL" if level == "CRITICAL" else "WARNING", f"{level}: {p.get('reason', '')}",
+                       p.get("rationale", ""), key=alert_id, r=r)
+        except Exception:  # noqa: BLE001 - the bell is a convenience, never the alert path
+            log.exception("dashboard notification failed")
         log.warning("ALERT %s %s/%s: %s", level, tid, p.get("rule"), p.get("reason"))
     elif level != "NORMAL":
         log.info("alert for %s/%s suppressed by cooldown", tid, p.get("rule"))

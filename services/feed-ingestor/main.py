@@ -98,7 +98,8 @@ def push(feed: dict) -> None:
         )
         if resp.status_code == 200:
             _warned.discard(key)
-            log.info("%s -> queued (static=%s)", key, resp.json().get("static"))
+            body = resp.json()
+            log.info("%s -> queued (static=%s, change=%s)", key, body.get("static"), body.get("change"))
         elif key not in _warned:
             _warned.add(key)
             log.error("%s rejected by gateway: HTTP %s %s", key, resp.status_code, resp.text[:120])

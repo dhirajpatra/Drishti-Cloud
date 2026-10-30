@@ -15,6 +15,7 @@ MOCK_MODE without a key writes one harmless demo item per tenant so the graph sh
 from __future__ import annotations
 
 import functools
+import hashlib
 import os
 import re
 import time
@@ -247,6 +248,37 @@ def fetch_newsapi_org(location: str) -> list[dict]:
              "ts": a.get("publishedAt") or now} for a in resp.json().get("articles", []) if a.get("title")][:MAX_ITEMS]
 
 
+HAZARD_CRITICAL = ("bomb", "blast", "explosion", "terror", "terrorist", "kidnap", "abduct", "stampede", "shooting", "gunfire",
+                   "hostage", "riot", "curfew", "building collapse", "collapse")
+HAZARD_WARNING = ("flood", "flooding", "heavy rain", "cyclone", "storm", "landslide", "earthquake", "fire", "power cut",
+                  "power outage", "outage", "blackout", "shutdown", "bandh", "strike", "protest", "accident", "heatwave",
+                  "advisory", "red alert", "orange alert", "waterlogging")
+_HAZARD_RE = {lvl: re.compile(r"\b(" + "|".join(re.escape(w) for w in words) + r")\b", re.I)
+              for lvl, words in (("CRITICAL", HAZARD_CRITICAL), ("WARNING", HAZARD_WARNING))}
+
+
+def hazard(headline: str) -> tuple[str, str] | None:
+    """(level, matched word) when a headline looks like something a security system should surface, else None."""
+    for lvl in ("CRITICAL", "WARNING"):
+        m = _HAZARD_RE[lvl].search(headline or "")
+        if m:
+            return lvl, m.group(1).lower()
+    return None
+
+
+def notify_hazards(tid: str, city: str, items: list[dict]) -> int:
+    """Dashboard notification for every LOCAL hazard headline (national filler is context only). De-duplicated per headline."""
+    sent = 0
+    for n in items:
+        if "(national)" in n["source"]:
+            continue
+        hz = hazard(n["headline"])
+        if hz and bus.notify(tid, "news", hz[0], f"Local news ({city}): {n['headline']}", f"{n['source']} · matched '{hz[1]}'",
+                             n.get("url"), key=hashlib.sha1(n["headline"].encode()).hexdigest()[:16]):
+            sent += 1
+    return sent
+
+
 def tick() -> None:
     if not settings.news_api_key and not settings.mock_mode:
         log.info("no NEWS_API_KEY - news context disabled")
@@ -269,6 +301,8 @@ def tick() -> None:
                 log.info("news for %s (%s): %d item(s)", t["id"], loc, len(cache[loc]))
             for n in cache[loc]:
                 graph.add_news(t["id"], n["headline"], n["source"], n.get("url"), n["ts"])
+            if notify_hazards(t["id"], loc, cache[loc]):
+                log.info("hazard news notification(s) raised for %s", t["id"])
         except NewsAuthError as exc:
             log.error("news disabled until next refresh: %s", exc)
             return
