@@ -222,3 +222,31 @@ def test_feed_url_validation_rejects_unsafe_or_unreadable_sources(client, url):
 def test_feed_accepts_hls_and_local_mp4(client):
     assert client.post("/tenants/mall_1/feeds", json={"camera_id": "hls", "url": "https://cdn.example.com/live/index.m3u8"}).status_code == 201
     assert client.post("/tenants/mall_1/feeds", json={"camera_id": "mp4", "url": "/app/feeds/mall.mp4"}).status_code == 201
+
+
+# --------------------------------------------------------------------------- motionEye web hook
+def test_motion_hook_token_cooldown_and_queue(client, redis_c, monkeypatch):
+    from drishti.config import settings
+    redis_c.flushdb()
+    monkeypatch.setattr(settings, "motion_hook_token", "s3cr3t")
+    monkeypatch.setattr(settings, "motion_hook_cooldown_sec", 60)
+    url = "/hook/motion/home_1_bangalore/kitchen"
+    assert client.get(url).status_code == 401 and client.get(url + "?token=nope").status_code == 401
+    assert client.get("/hook/motion/ghost/kitchen?token=s3cr3t").status_code == 404
+    assert client.get("/hook/motion/home_1_bangalore/..%2Fx?token=s3cr3t").status_code in (404, 422)
+    assert client.get(url + "?token=s3cr3t").json() == {"status": "triggered"}          # GET works (motionEye default) ...
+    assert client.post(url + "?token=s3cr3t").json()["status"] == "cooldown"             # ... one analysis per cooldown window
+    queued = [json.loads(x) for x in redis_c.lrange("trigger:feed", 0, -1)]
+    assert [(q["tenant"], q["camera"]) for q in queued] == [("home_1_bangalore", "kitchen")]
+    redis_c.delete("hookcd:home_1_bangalore:kitchen")
+    assert client.post(url + "?token=s3cr3t").json() == {"status": "triggered"}
+
+
+def test_motion_hook_refuses_to_run_open_when_auth_is_required(client, redis_c, monkeypatch):
+    from drishti.config import settings
+    monkeypatch.setattr(settings, "motion_hook_token", "")
+    monkeypatch.setattr(settings, "auth_required", True)
+    assert client.get("/hook/motion/home_1_bangalore/kitchen").status_code == 403
+    monkeypatch.setattr(settings, "auth_required", False)
+    redis_c.flushdb()
+    assert client.get("/hook/motion/home_1_bangalore/kitchen").json() == {"status": "triggered"}   # local default: no token needed

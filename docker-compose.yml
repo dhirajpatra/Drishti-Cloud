@@ -85,7 +85,7 @@ services:
     build: { <<: *py-build, args: { SERVICE: gateway } }
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
-    ports: ["${BIND_ADDR:-127.0.0.1}:8000:8000"]
+    ports: ["${GATEWAY_BIND_ADDR:-${BIND_ADDR:-127.0.0.1}}:8000:8000"]   # GATEWAY_BIND_ADDR=0.0.0.0 lets a camera on the LAN call the motion web hook
     environment:
       <<: *infra-env
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}

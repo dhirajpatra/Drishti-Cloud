@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;8000000")
@@ -84,7 +85,7 @@ def grab(feed: dict) -> bytes | None:
         cap.release()
 
 
-def push(feed: dict) -> None:
+def push(feed: dict, sensors: dict | None = None) -> None:
     key = f"{feed['tenant']}/{feed['camera']}"
     try:
         jpeg = grab(feed)
@@ -94,7 +95,7 @@ def push(feed: dict) -> None:
             f"{settings.gateway_url}/ingest/{feed['tenant']}", timeout=30,
             headers={"X-Admin-Token": TOKEN} if TOKEN else {},
             files={"file": ("frame.jpg", jpeg, "image/jpeg")},
-            data={"camera_id": feed["camera"], "sensors": json.dumps({"source": "rtsp"})},
+            data={"camera_id": feed["camera"], "sensors": json.dumps(sensors or {"source": "rtsp"})},
         )
         if resp.status_code == 200:
             _warned.discard(key)
@@ -109,6 +110,36 @@ def push(feed: dict) -> None:
             log.error("%s failed: %s", key, exc)
 
 
+def all_feeds(env_feeds: list[dict]) -> dict[tuple[str, str], dict]:
+    merged = {(f["tenant"], f["camera"]): f for f in env_feeds}          # .env feeds ...
+    merged.update({(f["tenant"], f["camera"]): f for f in bus.registered_feeds()})   # ... overridden by dashboard-registered ones
+    return merged
+
+
+def handle_trigger(raw: str, env_feeds: list[dict]) -> bool:
+    """A motionEye web hook fired: grab that camera's frame NOW and analyse it (motion=true bypasses the idle gate)."""
+    t = json.loads(raw)
+    feed = all_feeds(env_feeds).get((t["tenant"], t["camera"]))
+    if feed is None:
+        log.warning("motion hook for %s/%s but no such feed (camera id must match RTSP_FEEDS / the Camera sources panel)", t["tenant"], t["camera"])
+        return False
+    log.info("%s/%s motion hook -> analysing now", t["tenant"], t["camera"])
+    push(feed, {"source": "motioneye_hook", "pir": True})
+    return True
+
+
+def trigger_loop(env_feeds: list[dict]) -> None:
+    r = bus.redis_client()
+    while not bus.stopping():
+        try:
+            item = r.blpop("trigger:feed", timeout=5)
+            if item:
+                handle_trigger(item[1], env_feeds)
+        except Exception:  # noqa: BLE001
+            log.exception("motion trigger failed")
+            bus._stop.wait(2)
+
+
 def main() -> None:
     feeds = parse_feeds(os.environ.get("RTSP_FEEDS", ""))
     if not feeds:
@@ -117,6 +148,7 @@ def main() -> None:
         log.info("sampling %d feed(s) every %ss", len(feeds), settings.sample_interval_sec)
 
     pool = ThreadPoolExecutor(max_workers=16)
+    threading.Thread(target=trigger_loop, args=(feeds,), daemon=True, name="motion-triggers").start()
 
     def tick() -> None:
         try:

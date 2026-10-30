@@ -77,6 +77,8 @@ class Settings:
         self.admin_token = _s("ADMIN_TOKEN")
         self.cors_origins = _list("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
         self.max_frames_per_min = _i("MAX_FRAMES_PER_MIN", 60)
+        self.motion_hook_token = _s("MOTION_HOOK_TOKEN")            # secret in the motionEye web-hook URL (?token=...)
+        self.motion_hook_cooldown_sec = _i("MOTION_HOOK_COOLDOWN_SEC", 60)   # one analysis per camera per this many seconds
         self.max_upload_mb = _i("MAX_UPLOAD_MB", 5)
         self.seed_demo = _b("SEED_DEMO", True)
 

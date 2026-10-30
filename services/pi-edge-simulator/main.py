@@ -29,7 +29,7 @@ BG = {"mall_security": (58, 52, 70), "home_seniors": (70, 62, 52), "school_child
 COLOR = {"person": (90, 160, 255), "child": (120, 220, 255), "bag": (255, 160, 60), "fallen_person": (255, 90, 90),
          "stove": (230, 120, 60), "door": (160, 120, 80), "bed": (150, 150, 200), "monitor": (60, 220, 120),
          "staff": (130, 255, 160), "badge": (255, 230, 90), "gate_open": (255, 120, 120), "corridor": (90, 90, 110),
-         "patient": (200, 160, 255), "restricted_door": (255, 80, 80)}
+         "patient": (200, 160, 255), "restricted_door": (255, 80, 80), "violence": (255, 40, 40)}
 
 P = lambda n: {"label": "person", "count": n}  # noqa: E731
 
@@ -41,6 +41,7 @@ SCENARIOS: dict[str, list[tuple[str, dict, dict]]] = {
         ("unattended_bag", {"pir": True}, {"objects": [{"label": "bag", "bbox": [0.4, 0.55, 0.55, 0.8]}], "elapsed": {"unattended_bag": 150}}),
         ("shoppers", {"pir": True, "temp": 31}, {"objects": [P(5)]}),
         ("crowd_surge", {"pir": True}, {"objects": [P(64)]}),
+        ("fight", {"pir": True}, {"objects": [P(2), {"label": "violence", "bbox": [0.3, 0.3, 0.7, 0.9]}]}),
     ],
     "home_seniors": [
         ("morning_routine", {"pir": True, "temp": 28}, {"objects": [P(1), {"label": "stove", "bbox": [0.6, 0.4, 0.85, 0.7]}], "hour": 8}),
