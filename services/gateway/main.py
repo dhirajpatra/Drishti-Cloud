@@ -241,7 +241,8 @@ def ingest(
             changed = bin(h ^ int(prev["hash"])).count("1") > settings.hash_distance
         # idle while nothing moved; also hold a changed scene back until the minimum gap since the last analysis has passed
         # (the baseline stays put, so the change is picked up by the first sample after the gap)
-        static = age < settings.force_refresh_sec and (not changed or age < settings.min_analysis_gap_sec)
+        burst = change is not None and change >= settings.burst_fraction and age >= settings.burst_gap_sec   # fight / fall / panic
+        static = age < settings.force_refresh_sec and (not changed or (age < settings.min_analysis_gap_sec and not burst))
     if not static:
         r.hset(hkey, mapping={"hash": str(h), "sig": json.dumps(sig), "analyzed_ts": str(now)})
         r.expire(hkey, 7 * 86400)
@@ -269,6 +270,48 @@ def _iso(rows: list[dict], *fields: str) -> list[dict]:
 def cameras(tenant_id: str, request: Request):
     require_tenant(tenant_id, request)
     return bus.list_cameras(tenant_id)
+
+
+FEED_URL = re.compile(r"^(https?|rtsps?)://[^\s]{4,500}$|^/app/feeds/[A-Za-z0-9_\-./]{1,200}$")
+
+
+def _mask(url: str) -> str:
+    return re.sub(r"//[^/@\s]+@", "//***@", url)
+
+
+class FeedBody(BaseModel):
+    camera_id: str = Field(min_length=1, max_length=40)
+    url: str = Field(min_length=4, max_length=500)
+
+
+@app.get("/tenants/{tenant_id}/feeds")
+def list_feeds(tenant_id: str, request: Request):
+    """Camera sources added from the dashboard (credentials in the URL are masked)."""
+    require_tenant(tenant_id, request)
+    return [{"camera_id": f["camera"], "url": _mask(f["url"])} for f in bus.registered_feeds(tenant_id)]
+
+
+@app.post("/tenants/{tenant_id}/feeds", status_code=201)
+def add_feed(tenant_id: str, body: FeedBody, request: Request):
+    """Register a camera: motionEye/ESP32/phone snapshot or MJPEG, RTSP, an HLS (.m3u8) live URL or an MP4 under ./feeds.
+    The feed-ingestor picks it up on its next sample. Facebook/Instagram live pages are NOT accepted: Meta offers no API to read them."""
+    t = require_tenant(tenant_id, request)
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", body.camera_id):
+        raise HTTPException(422, "camera_id must be 1-40 chars of [A-Za-z0-9_-]")
+    if ".." in body.url or not FEED_URL.match(body.url):
+        raise HTTPException(422, "url must be http(s)://, rtsp(s):// or /app/feeds/<file>")
+    if re.match(r"https?://([^/@]*@)?([^/:]*\.)?(facebook|fb|instagram)\.(com|watch)\b", body.url, re.I):
+        raise HTTPException(422, "Facebook/Instagram pages cannot be read as a camera feed; use the camera's own RTSP/HTTP URL")
+    bus.put_feed(tenant_id, body.camera_id, t["vertical"], body.url)
+    return {"camera_id": body.camera_id, "url": _mask(body.url), "note": "picked up on the next sample"}
+
+
+@app.delete("/tenants/{tenant_id}/feeds/{camera_id}")
+def remove_feed(tenant_id: str, camera_id: str, request: Request):
+    require_tenant(tenant_id, request)
+    if not bus.del_feed(tenant_id, camera_id):
+        raise HTTPException(404, "no such registered camera (cameras from RTSP_FEEDS are managed in .env)")
+    return {"ok": True}
 
 
 @app.get("/tenants/{tenant_id}/cameras/{camera_id}/latest")

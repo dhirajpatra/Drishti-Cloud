@@ -3,3 +3,5 @@ Look for: the patient out of bed or on the floor, bed rails down with the patien
 or abnormal vitals (HR above 120 or below 40, SpO2 below 90), no staff near the bed for a long time.
 Normal: patient lying in bed, nurses performing rounds, visitors seated.
 Patient on the floor or a monitor alarm is CRITICAL. Be factual; this is decision support and a nurse confirms.
+
+Anyone hitting, roughly restraining or otherwise physically abusing a patient or staff member is CRITICAL immediately: set rule=physical_abuse and add a 'violence' object. Clinical restraint ordered by staff is NOT abuse.

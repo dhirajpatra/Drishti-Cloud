@@ -151,6 +151,26 @@ def notifications_read(tenant_id: str, ids: list[str] | None = None, r: redis.Re
     return changed
 
 
+# ------------------------------------------------------------------ camera sources registered from the dashboard
+def put_feed(tenant_id: str, camera_id: str, vertical: str, url: str, r: redis.Redis | None = None) -> None:
+    (r or redis_client()).hset(f"feedreg:{tenant_id}", camera_id, json.dumps({"vertical": vertical, "url": url}))
+
+
+def del_feed(tenant_id: str, camera_id: str, r: redis.Redis | None = None) -> int:
+    return int((r or redis_client()).hdel(f"feedreg:{tenant_id}", camera_id))
+
+
+def registered_feeds(tenant_id: str | None = None, r: redis.Redis | None = None) -> list[dict]:
+    """[{tenant, vertical, camera, url}] for one tenant or all of them."""
+    r = r or redis_client()
+    out = []
+    for key in ([f"feedreg:{tenant_id}"] if tenant_id else list(r.scan_iter("feedreg:*"))):
+        for cam, raw in r.hgetall(key).items():
+            d = json.loads(raw)
+            out.append({"tenant": key.split(":", 1)[1], "vertical": d["vertical"], "camera": cam, "url": d["url"]})
+    return sorted(out, key=lambda f: (f["tenant"], f["camera"]))
+
+
 # ------------------------------------------------------------------ rate limit
 def allow(key: str, limit: int, window_sec: int, r: redis.Redis | None = None) -> bool:
     """Fixed-window counter. True while under `limit` hits per window."""

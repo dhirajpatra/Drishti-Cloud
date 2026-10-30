@@ -17,6 +17,7 @@ import redis
 from .config import settings
 
 HELP_RE = re.compile(r"\b(help|bachao|save me|emergency|madad)\b", re.I)
+ABUSE_RE = re.compile(r"\b(stop hitting|don'?t hit|dont hit|why are you hitting|let me go|leave me alone|mat maro|maar rahe|chhod do|chhodo)\b", re.I)
 ALARM_RE = re.compile(r"\b(alarm|alert|critical|asystole|brady|tachy)\b", re.I)
 HR_RE = re.compile(r"\bHR\D{0,3}(\d{2,3})\b", re.I)
 SPO2_RE = re.compile(r"\bSP?O2\D{0,3}(\d{2,3})\b", re.I)
@@ -29,6 +30,16 @@ SYNONYMS = {
     "nurse": "staff", "doctor": "staff", "guard": "staff", "teacher": "staff",
     "person_on_floor": "fallen_person", "fallen": "fallen_person", "lying_person": "fallen_person",
     "burner": "stove", "stove_burner": "stove",
+    "fight": "violence", "fighting": "violence", "hitting": "violence", "punching": "violence", "slapping": "violence",
+    "kicking": "violence", "assault": "violence", "beating": "violence", "abuse": "violence", "physical_abuse": "violence",
+    "physical_violence": "violence", "person_hitting": "violence", "choking": "violence",
+}
+
+ABUSE_SPEAK = {
+    "mall_security": "Stop immediately. Security has been called.",
+    "home_seniors": "Stop that right now. Family has been informed.",
+    "school_children": "Stop immediately. School staff are coming.",
+    "icu_hospital": "Stop immediately. Security and the nurse station are alerted.",
 }
 
 
@@ -97,6 +108,11 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
         r.set(f"rstate:{tid}:last_motion", now, ex=7 * 86400)
     if "staff" in labels:
         r.set(f"rstate:{tid}:last_staff", now, ex=7 * 86400)
+
+    # ---- physical abuse / fight: every vertical, always CRITICAL and never suppressed by habits
+    if "violence" in labels or ABUSE_RE.search(audio) or any(ABUSE_RE.search(t) for t in texts):
+        out.append(_hit("physical_abuse", "CRITICAL", f"Possible physical abuse or fight in {cam}", ["violence"],
+                        ABUSE_SPEAK.get(vertical, "Stop immediately. Help is being called.")))
 
     if vertical == "mall_security":
         crowd = persons

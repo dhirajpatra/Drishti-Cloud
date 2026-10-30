@@ -4,3 +4,5 @@ the main gate standing open without staff, a group of children surrounding one c
 fences or gates being climbed.
 Normal: queues at assembly, children walking with a teacher, staff at the gate, break-time play.
 A stranger without a badge near children is CRITICAL. Do not describe children's faces or identities.
+
+Any adult or child hitting, kicking, slapping, shoving or dragging a child is CRITICAL immediately: set rule=physical_abuse and add a 'violence' object. Play-fighting during break is ALERT at most unless someone is clearly being hurt.

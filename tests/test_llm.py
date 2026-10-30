@@ -175,3 +175,89 @@ def test_rejected_effort_steps_down_then_drops(monkeypatch):
     monkeypatch.setattr(llm, "_record", lambda *a, **k: None)
     llm.chat_json("muse-spark-1.3", [], max_tokens=100, r=object(), reasoning=False)
     assert [p.get("reasoning") for p in sent] == [{"effort": "minimal"}, {"effort": "low"}, None]
+
+
+# --------------------------------------------------------------------------- Baseten + provider routing
+def test_openai_message_shape_for_baseten():
+    msgs = [{"role": "user", "content": [{"type": "text", "text": "hi"}, llm.image_part(b"x"),
+                                         {"type": "image_url", "image_url": {"url": "data:u"}}]}]
+    parts = llm.to_openai_messages(msgs)[0]["content"]
+    assert [p["type"] for p in parts] == ["text", "image_url", "image_url"]
+    assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,") and parts[2]["image_url"] == {"url": "data:u"}
+    assert llm.to_openai_messages([{"role": "user", "content": "plain"}]) == [{"role": "user", "content": "plain"}]
+
+
+def test_provider_specs():
+    assert llm.split_models(" baseten:meta-models/x | muse-spark-1.3 ") == ["baseten:meta-models/x", "muse-spark-1.3"]
+    assert llm.provider_of("baseten:meta-models/muse-spark-open-1026") == ("baseten", "meta-models/muse-spark-open-1026")
+    assert llm.provider_of("muse-spark-1.3") == ("meta", "muse-spark-1.3")
+
+
+def _fake_post(calls, replies):
+    def post(url, headers=None, json=None, timeout=None):
+        calls.append((url, copy.deepcopy(json), headers))
+        status, body = replies.pop(0)
+        return types.SimpleNamespace(status_code=status, text=str(body), json=lambda: body,
+                                     raise_for_status=lambda: (_ for _ in ()).throw(RuntimeError(f"HTTP {status}")))
+    return post
+
+
+import types  # noqa: E402
+
+
+def test_baseten_primary_then_meta_fallback(monkeypatch, redis_c):
+    monkeypatch.setattr(settings, "baseten_api_key", "BK")
+    monkeypatch.setattr(settings, "llama_api_url", "https://api.meta.ai/v1/responses")
+    redis_c.flushdb()
+    calls = []
+    replies = [(500, {"error": "down"}),                                                   # Baseten fails ...
+               (200, {"status": "completed", "output_text": '{"level": "NORMAL"}', "usage": {"input_tokens": 5, "output_tokens": 3}})]
+    monkeypatch.setattr(llm.requests, "post", _fake_post(calls, replies))
+    out = llm.chat_json("baseten:meta-models/muse-spark-open-1026|muse-spark-1.3", [{"role": "user", "content": "x"}], r=redis_c)
+    assert out == {"level": "NORMAL"}
+    assert calls[0][0] == "https://inference.baseten.co/v1/chat/completions" and calls[0][2]["Authorization"] == "Bearer BK"
+    assert calls[0][1]["model"] == "meta-models/muse-spark-open-1026" and "reasoning" not in calls[0][1]
+    assert calls[1][0].endswith("/v1/responses")                                           # ... Meta answers
+
+
+def test_baseten_answer_is_parsed_and_counted_separately(monkeypatch, redis_c):
+    monkeypatch.setattr(settings, "baseten_api_key", "BK")
+    redis_c.flushdb()
+    calls = []
+    body = {"choices": [{"message": {"content": '```json\n{"level": "ALERT"}\n```'}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7}}
+    monkeypatch.setattr(llm.requests, "post", _fake_post(calls, [(200, body)]))
+    assert llm.chat_json("baseten:meta-models/muse-spark-open-1026", [{"role": "user", "content": "x"}], r=redis_c) == {"level": "ALERT"}
+    key = list(redis_c.scan_iter(f"usage:{__import__('datetime').date.today().isoformat()}:baseten:*"))
+    assert key and redis_c.hgetall(key[0])["completion_tokens"] == "7"
+
+
+def test_baseten_skipped_without_key_and_empty_answer_retried(monkeypatch, redis_c):
+    monkeypatch.setattr(settings, "baseten_api_key", "")
+    monkeypatch.setattr(settings, "llama_api_url", "https://api.meta.ai/v1/responses")
+    redis_c.flushdb()
+    calls = []
+    ok = (200, {"status": "completed", "output_text": "{}"})
+    monkeypatch.setattr(llm.requests, "post", _fake_post(calls, [ok]))
+    llm.chat_json("baseten:meta-models/x|muse-spark-1.3", [{"role": "user", "content": "x"}], r=redis_c)
+    assert len(calls) == 1 and calls[0][0].endswith("/v1/responses")                      # never touched Baseten
+    monkeypatch.setattr(settings, "baseten_api_key", "BK")
+    calls.clear()
+    cut = (200, {"choices": [{"message": {"content": ""}, "finish_reason": "length"}], "usage": {}})
+    good = (200, {"choices": [{"message": {"content": '{"a": 1}'}, "finish_reason": "stop"}], "usage": {}})
+    monkeypatch.setattr(llm.requests, "post", _fake_post(calls, [cut, good]))
+    assert llm.chat_json("baseten:meta-models/muse-spark-open-1026", [{"role": "user", "content": "x"}], r=redis_c) == {"a": 1}
+    assert calls[1][1]["max_tokens"] == 2 * calls[0][1]["max_tokens"]
+
+
+def test_baseten_daily_cap_hands_over_to_meta(monkeypatch, redis_c):
+    monkeypatch.setattr(settings, "baseten_api_key", "BK")
+    monkeypatch.setattr(settings, "max_baseten_calls_per_day", 1)
+    monkeypatch.setattr(settings, "llama_api_url", "https://api.meta.ai/v1/responses")
+    redis_c.flushdb()
+    llm._reserve_call(redis_c, "baseten")
+    assert not llm.budget_ok(redis_c, "baseten:meta-models/x") and llm.budget_ok(redis_c, "baseten:meta-models/x|muse-spark-1.3")
+    calls = []
+    monkeypatch.setattr(llm.requests, "post", _fake_post(calls, [(200, {"status": "completed", "output_text": "{}"})]))
+    llm.chat_json("baseten:meta-models/x|muse-spark-1.3", [{"role": "user", "content": "x"}], r=redis_c)
+    assert calls[0][0].endswith("/v1/responses")
