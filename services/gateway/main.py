@@ -314,6 +314,27 @@ def remove_feed(tenant_id: str, camera_id: str, request: Request):
     return {"ok": True}
 
 
+@app.api_route("/hook/motion/{tenant_id}/{camera_id}", methods=["GET", "POST"])
+def motion_hook(tenant_id: str, camera_id: str, token: str = ""):
+    """motionEye "Call a Web Hook" target: a motion event makes the feed-ingestor grab the camera's current frame at once and
+    analyse it (PIR=true, so the idle gate is bypassed). At most one trigger per camera per MOTION_HOOK_COOLDOWN_SEC (cost guard)."""
+    _tenant(tenant_id)
+    want = settings.motion_hook_token
+    if not want:
+        if settings.auth_required:
+            raise HTTPException(403, "set MOTION_HOOK_TOKEN to use the motion web hook")
+    elif not hmac.compare_digest(token, want):
+        raise HTTPException(401, "bad token")
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", camera_id):
+        raise HTTPException(422, "bad camera_id")
+    r = bus.redis_client()
+    if not r.set(f"hookcd:{tenant_id}:{camera_id}", 1, nx=True, ex=max(1, settings.motion_hook_cooldown_sec)):
+        return {"status": "cooldown", "retry_after_sec": r.ttl(f"hookcd:{tenant_id}:{camera_id}")}
+    r.lpush("trigger:feed", json.dumps({"tenant": tenant_id, "camera": camera_id, "ts": bus.utcnow_iso()}))
+    r.ltrim("trigger:feed", 0, 99)
+    return {"status": "triggered"}
+
+
 @app.get("/tenants/{tenant_id}/cameras/{camera_id}/latest")
 def camera_latest(tenant_id: str, camera_id: str, request: Request):
     require_tenant(tenant_id, request)

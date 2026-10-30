@@ -61,3 +61,17 @@ def test_dashboard_registered_feeds_are_sampled_and_override_env(monkeypatch, re
     merged = {(f["tenant"], f["camera"]): f for f in env}
     merged.update({(f["tenant"], f["camera"]): f for f in bus.registered_feeds()})
     assert merged[("home_1_bangalore", "kitchen")]["url"] == "http://new-url/" and len(merged) == 3
+
+
+def test_motion_trigger_grabs_the_named_feed_with_pir_true(monkeypatch, redis_c):
+    import json
+    from drishti import bus
+    redis_c.flushdb()
+    bus.put_feed("school_1", "gate", "school_children", "rtsp://gate/1", redis_c)
+    env = fi.parse_feeds("home_1_bangalore:home_seniors:kitchen=http://192.168.1.4:8081/")
+    pushed = []
+    monkeypatch.setattr(fi, "push", lambda feed, sensors=None: pushed.append((feed["camera"], sensors)))
+    assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "kitchen"}), env) is True
+    assert fi.handle_trigger(json.dumps({"tenant": "school_1", "camera": "gate"}), env) is True      # dashboard-registered camera
+    assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "attic"}), env) is False
+    assert pushed == [("kitchen", {"source": "motioneye_hook", "pir": True}), ("gate", {"source": "motioneye_hook", "pir": True})]

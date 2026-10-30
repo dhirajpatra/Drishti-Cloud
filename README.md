@@ -523,3 +523,14 @@ to bring a live source in: the camera's own RTSP / HTTP (MJPEG, snapshot) URL, a
 from words heard ("stop hitting me", "mat maro"). Habits never suppress it. A sudden big change in the picture (`BURST_FRACTION`) is analysed
 without waiting for `MIN_ANALYSIS_GAP_SEC` (still at most every `BURST_GAP_SEC`). One still frame cannot prove abuse: expect false alarms
 (use "False alarm") and, for real coverage, sample often (`SAMPLE_INTERVAL_SEC=30`) - the idle gate keeps that cheap.
+
+**motionEye motion web hook (analyse the moment motion happens).** In motionEye: *Motion Notifications -> Call A Web Hook* = ON,
+method `GET`, URL
+`http://<laptop-LAN-ip>:8000/hook/motion/<tenant>/<camera>?token=<MOTION_HOOK_TOKEN>` - for your kitchen:
+`http://192.168.1.X:8000/hook/motion/home_1_bangalore/kitchen?token=...` (`<camera>` must equal the camera id in `RTSP_FEEDS`).
+Set `MOTION_HOOK_TOKEN`, `GATEWAY_BIND_ADDR=0.0.0.0` (the camera is another device, so the gateway must listen on the LAN) and recreate the
+gateway. A hook makes the feed-ingestor fetch the camera's current frame at once and analyse it (PIR=true bypasses the idle gate);
+`MOTION_HOOK_COOLDOWN_SEC` (60) allows one analysis per camera per minute whatever motionEye's *Motion Gap* is. Test it:
+`curl "http://localhost:8000/hook/motion/home_1_bangalore/kitchen?token=..."` -> `{"status":"triggered"}` (or `cooldown`), then
+`docker compose logs -f feed-ingestor` shows `motion hook -> analysing now`. With `AUTH_REQUIRED=true` the hook still works because it
+carries its own token; everything else on the LAN then needs the admin token.
