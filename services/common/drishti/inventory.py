@@ -141,3 +141,68 @@ def sweep(r=None) -> int:
                           key=f"exp:{it['name']}:{it['expiry']}:{'expired' if days < 0 else 'soon'}", r=r):
                 raised += 1
     return raised
+
+
+# ------------------------------------------------------------------ everyday staples + vision scan of a fridge camera
+# (name, kind, minimum). One click on the dashboard tracks these for a fridge camera.
+STAPLES = [("milk", "fridge", 1), ("eggs", "fridge", 4), ("bread", "general", 1), ("butter", "fridge", 1),
+           ("cheese", "fridge", 1), ("curd", "fridge", 1), ("vegetables", "fridge", 1), ("fruits", "fridge", 1),
+           ("juice", "fridge", 1)]
+ALIASES = {"egg": "eggs", "vegetable": "vegetables", "veggies": "vegetables", "veg": "vegetables", "greens": "vegetables",
+           "fruit": "fruits", "loaf": "bread", "bread_loaf": "bread", "yogurt": "curd", "yoghurt": "curd", "dahi": "curd",
+           "tomato": "vegetables", "tomatoes": "vegetables", "onion": "vegetables", "onions": "vegetables"}
+
+
+def seed_staples(tid: str, camera_id: str | None) -> list[str]:
+    """Track the everyday staples for a camera. Existing items keep the owner's settings; one that is not tied to a camera yet is tied to this one."""
+    added = []
+    with db._conn(tid) as c:
+        for name, kind, mn in STAPLES:
+            cur = c.execute("""INSERT INTO inventory (tenant_id, name, kind, camera_id, qty, min_stock)
+                               VALUES (%s,%s,%s,%s,0,%s)
+                               ON CONFLICT (tenant_id, name) DO UPDATE SET camera_id=EXCLUDED.camera_id, updated_at=now()
+                               WHERE inventory.camera_id IS NULL""",
+                            (tid, name, kind, camera_id, mn))
+            if cur.rowcount:
+                added.append(name)
+    return added
+
+
+def parse_scan(raw: dict, names: list[str]) -> dict[str, int] | None:
+    """Model answer -> {item: count} for the items it actually judged. None when the inside of the fridge was not visible.
+    Items the model did not mention (or listed as unsure) are NOT in the result: unknown must never read as 'out of stock'."""
+    if not isinstance(raw, dict) or raw.get("inside_fridge_visible") is not True:
+        return None
+    wanted = set(names)
+    unsure = {ALIASES.get(norm(x), norm(x)) for x in raw.get("unsure") or [] if isinstance(x, str)}
+    out: dict[str, int] = {}
+    for k, v in (raw.get("items") or {}).items():
+        key = ALIASES.get(norm(k), norm(k))
+        if key not in wanted or key in unsure or isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+            continue
+        out[key] = max(out.get(key, 0), min(int(v), 99))
+    return out
+
+
+def apply_scan(tid: str, camera_id: str, counts: dict[str, int], r=None) -> list[str]:
+    """Store the judged counts and raise ONE notification listing what is out or low. Returns those names."""
+    need: list[str] = []
+    for it in list_items(tid):
+        if it["camera_id"] != camera_id or it["name"] not in counts:
+            continue
+        set_count(tid, it["name"], counts[it["name"]])
+        if counts[it["name"]] < it["min_stock"]:
+            need.append(it["name"])
+    if need:
+        shown = ", ".join(n.replace("_", " ") for n in sorted(need))
+        bus.notify(tid, "inventory", "WARNING", f"Need to buy: {shown}",
+                   f"Not seen in the fridge on camera {camera_id}. Items hidden behind others can be missed, so check before ordering.",
+                   key=f"buy:{camera_id}:{','.join(sorted(need))}:{date.today().isoformat()}", r=r)
+    return need
+
+
+def shopping_list(tid: str) -> dict:
+    """What to buy (seen below minimum) and what has never been checked."""
+    items = annotate(list_items(tid))
+    to_buy = [i for i in items if i["last_seen"] and i["count"] < i["min_stock"]]
+    return {"to_buy": to_buy, "unchecked": [i for i in items if not i["last_seen"]], "total": len(items)}

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, ScanSearch, ShoppingBasket, Trash2 } from "lucide-react";
 import { api, type InventoryItem } from "../api";
 import { relTime, useNow, usePoll } from "../lib";
 import { Empty, ErrorLine, Panel, Pill, btnGhost, btnPrimary, inputCls, inputStyle } from "./ui";
@@ -14,6 +14,10 @@ const STATUS_COLOR: Record<InventoryItem["status"], string> = {
 /** Stock on a fridge, medicine trolley or shelf. Counts come from what the camera sees; minimum stock and expiry are set here. */
 export function Inventory({ tenantId }: { tenantId: string }) {
   const items = usePoll(() => api.inventory(tenantId), 10_000, [tenantId]);
+  const shop = usePoll(() => api.shopping(tenantId), 10_000, [tenantId]);
+  const cams = usePoll(() => api.cameras(tenantId), 30_000, [tenantId]);
+  const [fridgeCam, setFridgeCam] = useState<string>("");
+  const [info, setInfo] = useState<string | null>(null);
   const now = useNow(15_000);
   const [name, setName] = useState<string>("");
   const [kind, setKind] = useState<string>("fridge");
@@ -45,6 +49,28 @@ export function Inventory({ tenantId }: { tenantId: string }) {
     }
   };
 
+  const cam = fridgeCam || cams.data?.[0]?.camera_id || "";
+  const staples = async () => {
+    setBusy(true); setErr(null); setInfo(null);
+    try {
+      const r = await api.addStaples(tenantId, cam);
+      setInfo(r.added.length ? `Now tracking: ${r.added.join(", ")}. Looking at the fridge...` : "Everyday food is already tracked. Looking at the fridge...");
+      items.reload(); shop.reload();
+    } catch (x) { setErr(x instanceof Error ? x.message : String(x)); } finally { setBusy(false); }
+  };
+  const scan = async () => {
+    setBusy(true); setErr(null); setInfo("Looking inside the fridge...");
+    try {
+      await api.scanFridge(tenantId, cam);
+      for (let i = 0; i < 12; i++) {                       // the fridge agent answers within ~10-30 s
+        await new Promise((r) => setTimeout(r, 2500));
+        const r = await api.scanResult(tenantId, cam);
+        if (r.result) { setInfo(r.result.startsWith("updated") ? "Fridge checked. " + r.result : r.result); break; }
+      }
+      items.reload(); shop.reload();
+    } catch (x) { setErr(x instanceof Error ? x.message : String(x)); } finally { setBusy(false); }
+  };
+
   const remove = async (itemIdentifier: string) => {
     setBusy(true);
     setErr(null);
@@ -74,6 +100,31 @@ export function Inventory({ tenantId }: { tenantId: string }) {
         </span>
       }
     >
+      <div className="rounded-xl border p-3 mb-3" style={{ borderColor: shop.data?.to_buy.length ? "var(--warn)" : "var(--line)", background: shop.data?.to_buy.length ? "var(--warn-bg)" : "transparent" }}>
+        <p className="mono text-[11px] tracking-widest flex items-center gap-1.5" style={{ color: shop.data?.to_buy.length ? "var(--warn)" : "var(--muted)" }}>
+          <ShoppingBasket size={13} />NEED TO BUY
+        </p>
+        {shop.data?.to_buy.length ? (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {shop.data.to_buy.map((i) => (
+              <span key={i.id} className="text-[12px] font-semibold px-2.5 py-1 rounded-full border" style={{ borderColor: "var(--warn)" }}>
+                {i.name.replace(/_/g, " ")} <span className="mono font-normal" style={{ color: "var(--muted)" }}>{i.count === 0 ? "none seen" : `${i.count} of ${i.min_stock}`}</span>
+              </span>))}
+          </div>
+        ) : (
+          <p className="text-[12px] mt-1" style={{ color: "var(--muted)" }}>
+            {shop.data && shop.data.unchecked.length ? `Nothing is missing so far. ${shop.data.unchecked.length} item(s) not checked yet: open the fridge door in front of the camera, or press Scan.` : "Nothing is missing."}
+          </p>)}
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <select className={inputCls + " !w-auto"} style={inputStyle} value={cam} onChange={(e) => setFridgeCam(e.target.value)} aria-label="Fridge camera">
+            {(cams.data ?? []).map((c) => <option key={c.camera_id} value={c.camera_id}>{c.camera_id}</option>)}
+          </select>
+          <button disabled={busy || !cam} onClick={staples} className="mono text-[11px] px-3 py-2 rounded-lg flex items-center gap-1.5 disabled:opacity-50" style={btnPrimary}><Plus size={12} />TRACK EVERYDAY FOOD</button>
+          <button disabled={busy || !cam} onClick={scan} className="mono text-[11px] px-3 py-2 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={btnGhost}><ScanSearch size={12} />SCAN FRIDGE NOW</button>
+        </div>
+        <p className="text-[11px] mt-2" style={{ color: "var(--muted)" }}>Milk, eggs, bread, butter, cheese, curd, vegetables, fruits, juice. The camera must see <b>inside</b> the fridge; a closed door changes nothing.</p>
+        {info && <p className="mono text-[11px] mt-1" style={{ color: "var(--ok)" }}>{info}</p>}
+      </div>
       <form onSubmit={add} className="grid sm:grid-cols-[1fr_8rem_6rem_9rem_8rem_auto] gap-2">
         <input
           className={inputCls}

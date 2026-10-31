@@ -49,7 +49,7 @@ The Muse idea is a personal AI that **sees what you see, knows your world and ac
 | **What is different** | (1) **Six cooperating agents** on a Redis bus, not one prompt. (2) **A per-site memory** (Neo4j habit graph) so "Dad naps at 3 pm" is not an alarm. (3) **World context**: local news can raise an alert's severity. (4) **Cost discipline**: the model is called only when the picture meaningfully changes, so it runs on a hobby budget. |
 | **Meta technology used** | Muse Spark (vision + decisions), Muse Wonder (reasoning over memory and news), SAM 3.1 (segmentation), Meta Responses API, **Muse Spark Open on Baseten** (hackathon credits, with automatic fallback), **WhatsApp Business Cloud API** (alerts), built and extended with **Muse Code** (`SKILL.md`). |
 | **Runs how** | `docker compose up -d` on a laptop today, the same file on any cloud later. **No API key needed to try it**: it starts in an offline `MOCK_MODE` with a built-in simulator. |
-| **Verified** | 143 automated tests (whole six-agent pipeline end to end, in mock mode, plus gateway, cost-control, news, Baseten routing, WhatsApp, motion hook). Also running against a real motionEye camera, Meta Responses API, Neo4j and freenewsapi.io. |
+| **Verified** | 149 automated tests (whole six-agent pipeline end to end, in mock mode, plus gateway, cost-control, news, Baseten routing, WhatsApp, motion hook). Also running against a real motionEye camera, Meta Responses API, Neo4j and freenewsapi.io. |
 
 ### Try it in two minutes (no keys, no camera)
 ```bash
@@ -242,13 +242,14 @@ curl -X POST http://localhost:8000/ingest/mall_1 -F "file=@photo.jpg" -F "camera
 ### 6. Tests (no Docker, no key, no Neo4j needed)
 ```bash
 pip install ./services/common fastapi "uvicorn[standard]" python-multipart pytest
-make test      # throw-away redis + postgres, whole pipeline in MOCK_MODE: 143 tests
+make test      # throw-away redis + postgres, whole pipeline in MOCK_MODE: 149 tests
 make smoke     # against a running stack: one hazard per vertical must raise the right alert
 ```
 
 ---
 
 ## Dashboard tour
+0a. **Stock panel / fridge agent**: point a camera inside the fridge, press *Track everyday food* (milk, eggs, bread, butter, cheese, curd, vegetables, fruits, juice) and the vision model counts what it sees; anything below its minimum appears under **Need to buy** and as one dashboard notification. It only asks the model when the picture changed (door opened, shopping put away), ignores a closed door, and never treats an item it was unsure about as missing.
 0. **Admin tab**: pick a site or a single camera (kitchen, mall gate...) and set everything in the browser, saved to the database and applied by every agent within seconds, no `.env` edit or restart: camera **IP / port / path / username / password** (password encrypted, write-only, with a *Test connection* button that shows a live preview), which **alarms** are on, their level, repeat time and active hours, **limits** (crowd size, unattended-bag time, night hours...), **custom watch rules in plain English** plus exact **object rules** ("person absent for 10 min"), who gets **WhatsApp / webhook** messages and what each level triggers, how often to look and how sensitive to change, and the site's SOP. Defaults come from code/`.env`; the page shows what is customised and can reset it. Set `AUTH_REQUIRED=true` and `SECRETS_KEY` before exposing it.
 1. **Notifications**: local-news hazards and confirmed alerts, unread badge, click to mark read.
 2. **Live cameras**: newest frame per camera, stale warning if a camera goes quiet.
@@ -333,7 +334,7 @@ These are the next modules for the agency product. None of them exist in the cod
 - [x] Docker Compose multi-agent system, Neo4j graph memory, Postgres RLS, Redis streams
 - [x] Multi-tenant, multi-modal (images, video/sensors, text, docs), multi-vertical (home, mall, school, ICU)
 - [x] Real camera, real news, real model calls; **and** a full offline mode for anyone to try it
-- [x] 143 automated tests
+- [x] 149 automated tests
 
 ## Author and license
 **Dhiraj Patra**, Bangalore, India · MIT. Built for learning and community safety.

@@ -610,6 +610,41 @@ def save_inventory(tenant_id: str, body: InventoryIn, request: Request):
     return inventory.annotate([row])[0]
 
 
+class StaplesIn(BaseModel):
+    camera_id: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\-]+$")
+
+
+@app.post("/tenants/{tenant_id}/inventory/staples", status_code=201)
+def add_staples(tenant_id: str, body: StaplesIn, request: Request):
+    """Track the everyday food staples (milk, eggs, bread, butter, cheese, curd, vegetables, fruits, juice) on a fridge camera."""
+    require_tenant(tenant_id, request)
+    added = inventory.seed_staples(tenant_id, body.camera_id)
+    bus.redis_client().rpush("invscan:req", json.dumps({"tenant": tenant_id, "camera": body.camera_id}))
+    return {"added": added, "items": inventory.annotate(inventory.list_items(tenant_id))}
+
+
+@app.get("/tenants/{tenant_id}/inventory/shopping")
+def shopping(tenant_id: str, request: Request):
+    """What to buy: tracked items last seen below their minimum, plus the ones never checked yet."""
+    require_tenant(tenant_id, request)
+    return inventory.shopping_list(tenant_id)
+
+
+@app.post("/tenants/{tenant_id}/inventory/scan")
+def scan_now(tenant_id: str, body: StaplesIn, request: Request):
+    """Ask the fridge agent to look at this camera now (it also looks by itself when the picture changes)."""
+    require_tenant(tenant_id, request)
+    r = bus.redis_client()
+    r.rpush("invscan:req", json.dumps({"tenant": tenant_id, "camera": body.camera_id}))
+    return {"queued": True}
+
+
+@app.get("/tenants/{tenant_id}/inventory/scan/{camera_id}")
+def scan_result(tenant_id: str, camera_id: str, request: Request):
+    require_tenant(tenant_id, request)
+    return {"result": bus.redis_client().get(f"invscan:last:{tenant_id}:{camera_id}")}
+
+
 @app.delete("/tenants/{tenant_id}/inventory/{name}")
 def delete_inventory(tenant_id: str, name: str, request: Request):
     require_tenant(tenant_id, request)

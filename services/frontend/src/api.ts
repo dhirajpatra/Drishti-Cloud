@@ -124,6 +124,7 @@ export interface InventoryItem {
   expiry: string | null; expiry_alert_days: number; last_seen: string | null;
   status: "ok" | "low" | "expiring" | "expired"; days_to_expiry: number | null;
 }
+export interface Shopping { to_buy: InventoryItem[]; unchecked: InventoryItem[]; total: number }
 export interface InventoryInput {
   name: string; kind: string; min_stock: number; expiry?: string | null; camera_id?: string | null;
   count?: number | null; expiry_alert_days?: number;
@@ -201,6 +202,13 @@ export const api = {
   inventory: (id: string) => json<InventoryItem[]>(`/tenants/${encodeURIComponent(id)}/inventory`),
   saveInventory: (id: string, b: InventoryInput) =>
     json<InventoryItem>(`/tenants/${encodeURIComponent(id)}/inventory`, jsonInit("POST", b)),
+  shopping: (id: string) => json<Shopping>(`/tenants/${encodeURIComponent(id)}/inventory/shopping`),
+  addStaples: (id: string, camera_id: string) =>
+    json<{ added: string[] }>(`/tenants/${encodeURIComponent(id)}/inventory/staples`, jsonInit("POST", { camera_id })),
+  scanFridge: (id: string, camera_id: string) =>
+    json<{ queued: boolean }>(`/tenants/${encodeURIComponent(id)}/inventory/scan`, jsonInit("POST", { camera_id })),
+  scanResult: (id: string, camera_id: string) =>
+    json<{ result: string | null }>(`/tenants/${encodeURIComponent(id)}/inventory/scan/${encodeURIComponent(camera_id)}`),
   removeInventory: (id: string, name: string) =>
     json<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/inventory/${encodeURIComponent(name)}`, { method: "DELETE" }),
   ingest: (tenantId: string, file: File, sensors: string, cameraId: string, force: boolean) => {
