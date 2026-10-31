@@ -7,23 +7,28 @@ ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_DEFAULT_TIMEOUT=300 P
 ARG SERVICE
 ARG SYSTEM_PACKAGES=""
 RUN if [ -n "$SYSTEM_PACKAGES" ]; then \
-      apt-get update && apt-get install -y --no-install-recommends $SYSTEM_PACKAGES \
-      && rm -rf /var/lib/apt/lists/*; \
-    fi
+  apt-get update && apt-get install -y --no-install-recommends $SYSTEM_PACKAGES \
+  && rm -rf /var/lib/apt/lists/*; \
+  fi
 
 WORKDIR /app
 COPY common /opt/common
 # The feed ingestor does not use the API/database clients required by other services.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    if [ "$SERVICE" = "feed-ingestor" ]; then \
-      pip install -r /opt/common/requirements-feed-ingestor.txt; \
-    else \
-      pip install -r /opt/common/requirements.txt; \
-    fi
+  if [ "$SERVICE" = "feed-ingestor" ]; then \
+  pip install -r /opt/common/requirements-feed-ingestor.txt; \
+  else \
+  pip install -r /opt/common/requirements.txt; \
+  fi
 
-COPY ${SERVICE}/requirements.txt /tmp/requirements.txt
+# Copy requirements if present, or create an empty temporary file as a fallback
+COPY ${SERVICE}/requirements.txt* /tmp/
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r /tmp/requirements.txt
+  if [ -f /tmp/requirements.txt ]; then pip install -r /tmp/requirements.txt; fi
+
+# COPY ${SERVICE}/requirements.txt /tmp/requirements.txt
+# RUN --mount=type=cache,target=/root/.cache/pip \
+#   pip install -r /tmp/requirements.txt
 
 RUN useradd --system --uid 10001 --no-create-home drishti
 COPY ${SERVICE}/ /app/

@@ -17,6 +17,7 @@ os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stime
 
 import cv2  # noqa: E402
 import httpx  # noqa: E402
+import redis  # noqa: E402
 
 from drishti import bus, siteconfig  # noqa: E402
 from drishti.config import settings  # noqa: E402
@@ -27,6 +28,8 @@ log = get_logger("feed-ingestor")
 TOKEN = os.environ.get("ADMIN_TOKEN", "")
 _pos_ms: dict[str, float] = {}
 _warned: set[str] = set()
+TRIGGER_BLOCK_SEC = 5
+TRIGGER_SOCKET_TIMEOUT_SEC = TRIGGER_BLOCK_SEC + 5
 
 
 def parse_feeds(spec: str) -> list[dict]:

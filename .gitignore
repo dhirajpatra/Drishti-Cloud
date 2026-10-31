@@ -168,3 +168,5 @@ cython_debug/
 #.idea/
 Miniconda3-latest-Linux-x86_64.sh
 *.sh
+!start.sh
+!stop.sh

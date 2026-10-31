@@ -242,7 +242,15 @@ def fetch_newsapi_org(location: str) -> list[dict]:
           'kidnap OR flood OR "heat wave" OR curfew')
     resp = httpx.get("https://newsapi.org/v2/everything", timeout=15, headers={"X-Api-Key": settings.news_api_key},
                      params={"q": f'"{location}" AND ({kw})', "language": LANGUAGE, "sortBy": "publishedAt", "pageSize": MAX_ITEMS})
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (401, 403):
+            raise NewsAuthError(
+                f"NewsAPI.org rejected NEWS_API_KEY (HTTP {exc.response.status_code}). "
+                "Check that NEWS_API_KEY is a valid NewsAPI.org key."
+            ) from exc
+        raise
     now = bus.utcnow_iso()
     return [{"headline": a["title"], "source": (a.get("source") or {}).get("name", "newsapi"), "url": a.get("url"),
              "ts": a.get("publishedAt") or now} for a in resp.json().get("articles", []) if a.get("title")][:MAX_ITEMS]
