@@ -1,220 +1,105 @@
-import base64
+"""Fridge inventory agent: looks INSIDE a fridge camera and keeps the stock list of everyday food up to date.
+
+For every camera that has tracked items (milk, eggs, bread, butter, cheese, vegetables ... added from the dashboard) it takes
+the camera's newest frame, asks the vision model which of those items it can see and how many, stores the counts and raises
+one "Need to buy: ..." notification. Cost control: it only asks the model when the picture changed (a door opened, shopping
+put away) or every INVENTORY_REFRESH_SEC, never more often than INVENTORY_SCAN_SEC. The dashboard's "Scan now" skips the wait.
+
+Honest limits: it only updates items the model is sure about, a closed door / dark / blocked view changes nothing, and items
+hidden behind others can read as missing. It tells you what to check, it does not replace looking.
+"""
+from __future__ import annotations
+
+import io
 import json
-import logging
 import os
-import sys
 import time
-from typing import Any, Dict, List, Optional
-import httpx
 
-# Configure logging
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger("fridge-inventory-agent")
+from PIL import Image
 
-# Configuration Environment Variables
-MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ("true", "1", "yes")
-BASETEN_API_KEY = os.getenv("BASETEN_API_KEY", "").strip()
-BASETEN_API_URL = os.getenv("BASETEN_API_URL", "https://inference.baseten.co/v1").rstrip("/")
-LLAMA_API_KEY = os.getenv("LLAMA_API_KEY", "").strip()
-LLAMA_API_URL = os.getenv("LLAMA_API_URL", "https://api.meta.ai/v1/responses").rstrip("/")
+from drishti import bus, db, inventory, llm
+from drishti.config import settings
+from drishti.log import get_logger
 
-SPARK_MODEL = os.getenv(
-    "SPARK_MODEL",
-    "baseten:meta-models/muse-spark-open-1026|muse-spark-1.3"
-)
-REASONING_EFFORT_FAST = os.getenv("REASONING_EFFORT_FAST", "minimal")
-FAST_HEADROOM_TOKENS = int(os.getenv("FAST_HEADROOM_TOKENS", "512"))
-SAMPLE_INTERVAL_SEC = int(os.getenv("SAMPLE_INTERVAL_SEC", "120"))
+log = get_logger("fridge-inventory-agent")
+SCAN_SEC = int(os.environ.get("INVENTORY_SCAN_SEC", "600"))            # minimum gap between scans of one camera
+REFRESH_SEC = int(os.environ.get("INVENTORY_REFRESH_SEC", "21600"))    # rescan even an unchanged picture this often
+CHANGE = float(os.environ.get("INVENTORY_CHANGE", "6"))                # mean grey-level difference that counts as "changed"
 
-GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:8000")
+PROMPT = """This is a camera picture of the inside of a refrigerator or kitchen shelf.
+First decide whether the INSIDE of the fridge (shelves with food) is actually visible. Closed door, very dark, blocked or
+unclear = false.
+Then, for each of these items, count what you can clearly see: {names}.
+Counting: eggs = individual eggs; milk / curd / juice = cartons, packets or bottles; bread = loaves or packs; butter / cheese = packs;
+vegetables / fruits = separate bags, bunches or pieces. 0 means you can see the shelves and it is not there.
+If part of the fridge is hidden or you are not sure about an item, put it in "unsure" instead of guessing 0.
+Return JSON only: {{"inside_fridge_visible": true|false, "items": {{"milk": 1, "eggs": 0}}, "unsure": ["cheese"]}}"""
 
 
-def resolve_model_and_credentials() -> tuple[str, str, str]:
-    """Resolves whether to use Baseten or Meta API endpoint and model slug based on .env configuration."""
-    models = [m.strip() for m in SPARK_MODEL.split("|")]
-    
-    # Try Baseten first if key is present
-    if BASETEN_API_KEY:
-        for m in models:
-            if m.startswith("baseten:"):
-                model_name = m.replace("baseten:", "")
-                return BASETEN_API_URL, BASETEN_API_KEY, model_name
-    
-    # Fallback to Meta API if key is present
-    if LLAMA_API_KEY:
-        for m in models:
-            clean_m = m.replace("baseten:", "")
-            return LLAMA_API_URL, LLAMA_API_KEY, clean_m
-
-    return "", "", ""
+def signature(jpeg: bytes) -> list[int]:
+    return list(Image.open(io.BytesIO(jpeg)).convert("L").resize((16, 12)).tobytes())
 
 
-def encode_image_to_base64(image_path: str) -> str:
-    """Reads a local image file and converts it to a base64 data URI."""
-    with open(image_path, "rb") as image_file:
-        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-    return f"data:image/jpeg;base64,{encoded_string}"
+def changed(a: list[int], b: list[int]) -> bool:
+    return sum(abs(x - y) for x, y in zip(a, b)) / max(1, len(a)) > CHANGE
 
 
-def analyze_fridge_image_with_muse(image_data_uri: str) -> List[Dict[str, Any]]:
-    """Calls the Muse Spark VLM model to analyze fridge/freezer contents and detect items and quantities."""
-    api_url, api_key, model_id = resolve_model_and_credentials()
-
-    if MOCK_MODE or not api_key:
-        logger.info("Running in MOCK_MODE or API keys missing. Generating mock vision analysis.")
-        return [
-            {"item_name": "milk", "kind": "fridge", "count": 1, "min_stock": 2, "expiry_risk": False},
-            {"item_name": "frozen_pizza", "kind": "freezer", "count": 0, "min_stock": 1, "expiry_risk": False},
-            {"item_name": "insulin_vial", "kind": "medicine", "count": 3, "min_stock": 5, "expiry_risk": True},
-        ]
-
-    prompt = (
-        "You are an advanced inventory computer vision system inspecting the inside of a fridge, freezer, or storage cabinet.\n"
-        "Analyze the provided image and extract a list of all visible items, estimated quantities, storage type, and condition.\n\n"
-        "Return ONLY a JSON array of objects with the following schema:\n"
-        "[\n"
-        "  {\n"
-        "    \"item_name\": \"string (e.g. milk, ice_cream, vaccine_vial)\",\n"
-        "    \"kind\": \"fridge | freezer | medicine | general\",\n"
-        "    \"count\": integer,\n"
-        "    \"min_stock\": integer (suggested threshold),\n"
-        "    \"expiry_risk\": boolean\n"
-        "  }\n"
-        "]\n"
-        "Do not include markdown code block formatting or explanations."
-    )
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": model_id,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_data_uri}}
-                ]
-            }
-        ],
-        "max_tokens": FAST_HEADROOM_TOKENS,
-        "reasoning_effort": REASONING_EFFORT_FAST,
-        "temperature": 0.1
-    }
-
+def scan_camera(tid: str, cam: str, r, force: bool = False, now: float | None = None) -> str:
+    """One look at one camera. Returns a short status (also what the tests assert on)."""
+    now = now or time.time()
+    items = [i for i in inventory.list_items(tid) if i["camera_id"] == cam]
+    if not items:
+        return "no tracked items on this camera"
+    jpeg = bus.get_latest(tid, cam)
+    if jpeg is None:
+        return "no frame yet"
+    key = f"invscan:{tid}:{cam}"
+    prev = r.hgetall(key)
+    sig = signature(jpeg)
+    if prev and not force:
+        age = now - float(prev["ts"])
+        if age < SCAN_SEC or (age < REFRESH_SEC and not changed(sig, json.loads(prev["sig"]))):
+            return "skipped: nothing changed"
+    if settings.mock_mode or not llm.budget_ok(r, settings.spark_model):
+        return "skipped: no model available (mock mode or daily limit reached)"
+    names = [i["name"] for i in items]
     try:
-        endpoint = f"{api_url}/chat/completions" if not api_url.endswith("/completions") else api_url
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(endpoint, headers=headers, json=payload)
-            response.raise_for_status()
-            res_json = response.json()
-            
-            raw_text = res_json["choices"][0]["message"]["content"].strip()
-            # Clean markdown code blocks if the model included them
-            if raw_text.startswith("```"):
-                raw_text = raw_text.split("```")[1]
-                if raw_text.startswith("json"):
-                    raw_text = raw_text[4:]
-            
-            return json.loads(raw_text.strip())
-
-    except Exception as e:
-        logger.error(f"Error invoking Muse Spark API: {e}. Falling back to default baseline.")
-        return []
+        raw = llm.chat_json(settings.spark_model, [{"role": "user", "content": [
+            {"type": "text", "text": PROMPT.format(names=", ".join(names))}, llm.image_part(jpeg)]}],
+            max_tokens=300, r=r, reasoning=False)
+    except Exception:  # noqa: BLE001
+        log.exception("fridge scan failed for %s/%s", tid, cam)
+        return "model call failed"
+    r.hset(key, mapping={"sig": json.dumps(sig), "ts": str(now)})
+    r.expire(key, 7 * 86400)
+    counts = inventory.parse_scan(raw, names)
+    if counts is None:
+        return "inside of the fridge not visible"
+    need = inventory.apply_scan(tid, cam, counts, r)
+    log.info("%s/%s fridge scan: %s | need to buy: %s", tid, cam, counts, need or "nothing")
+    return f"updated {len(counts)} item(s), need: {', '.join(need) or 'nothing'}"
 
 
-def process_inventory_and_order(tenant_id: str, detected_items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Compares detected inventory counts against minimum thresholds and constructs mock restock orders."""
-    order_items = []
-
-    for item in detected_items:
-        name = item.get("item_name", "unknown")
-        count = item.get("count", 0)
-        min_stock = item.get("min_stock", 1)
-
-        # Sync inventory state with gateway
+def tick() -> None:
+    r = bus.redis_client()
+    wanted: set[tuple[str, str, bool]] = set()
+    while (raw := r.lpop("invscan:req")):                                 # "Scan now" clicks from the dashboard
         try:
-            with httpx.Client(timeout=10.0) as client:
-                client.post(
-                    f"{GATEWAY_URL}/api/tenants/{tenant_id}/inventory",
-                    json={
-                        "name": name,
-                        "kind": item.get("kind", "fridge"),
-                        "min_stock": min_stock,
-                        "count": count,
-                        "camera_id": "fridge_cam_01"
-                    }
-                )
-        except Exception as err:
-            logger.warning(f"Could not update central inventory gateway: {err}")
-
-        # Check if reorder is needed
-        if count < min_stock:
-            reorder_qty = (min_stock - count) + 2  # Order buffer
-            order_items.append({
-                "item_name": name,
-                "current_count": count,
-                "min_stock": min_stock,
-                "order_quantity": reorder_qty,
-                "unit": "units"
-            })
-
-    # Generate Mock Purchase Order payload if items need replenishment
-    mock_order = None
-    if order_items:
-        mock_order = {
-            "order_id": f"ORD-{tenant_id[:8].upper()}-{int(time.time())}",
-            "tenant_id": tenant_id,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "status": "MOCK_ORDER_CREATED",
-            "supplier": "Drishti Auto-Replenishment Hub",
-            "items": order_items,
-            "total_items_ordered": sum(i["order_quantity"] for i in order_items)
-        }
-        logger.info(f"Generated Restock Order: {json.dumps(mock_order, indent=2)}")
-
-    return {
-        "detected_items": detected_items,
-        "mock_order": mock_order
-    }
-
-
-def main():
-    logger.info("Initializing Fridge Inventory Agent...")
-    tenant_id = os.getenv("TENANT_ID", "home_1_bangalore")
-    
-    logger.info(f"Agent up and running for tenant '{tenant_id}'. Check interval: {SAMPLE_INTERVAL_SEC}s")
-
-    while True:
+            q = json.loads(raw)
+            wanted.add((q["tenant"], q["camera"], True))
+        except (ValueError, KeyError):
+            continue
+    for t in db.all_tenants():
+        for cam in {i["camera_id"] for i in inventory.list_items(t["id"]) if i["camera_id"]}:
+            wanted.add((t["id"], cam, False))
+    for tid, cam, force in sorted(wanted, key=lambda w: not w[2]):
         try:
-            sample_image_path = "/tmp/fridge_latest.jpg"
-            
-            if os.path.exists(sample_image_path):
-                data_uri = encode_image_to_base64(sample_image_path)
-            else:
-                # Placeholder image URI for demo/mock execution
-                data_uri = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBD-placeholder"
-
-            logger.info("Analyzing fridge visual frame...")
-            detected = analyze_fridge_image_with_muse(data_uri)
-            result = process_inventory_and_order(tenant_id, detected)
-
-            if result["mock_order"]:
-                logger.info(f"Triggered order for {len(result['mock_order']['items'])} low-stock item(s).")
-            else:
-                logger.info("All fridge inventory levels are within acceptable thresholds.")
-
-        except Exception as e:
-            logger.error(f"Error during execution loop: {e}")
-
-        time.sleep(SAMPLE_INTERVAL_SEC)
+            res = scan_camera(tid, cam, r, force)
+            if force:
+                r.set(f"invscan:last:{tid}:{cam}", res, ex=600)
+        except Exception:  # noqa: BLE001
+            log.exception("scan of %s/%s failed", tid, cam)
 
 
 if __name__ == "__main__":
-    main()
+    bus.run_periodic("fridge-inventory-agent", 10, tick)
