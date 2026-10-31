@@ -339,4 +339,4 @@ These are the next modules for the agency product. None of them exist in the cod
 **Dhiraj Patra**, Bangalore, India · MIT. Built for learning and community safety.
 Credits: Meta Model API, Baseten, Neo4j, Redis, PostgreSQL, motionEye, freenewsapi.io.
 
-> "One Pi watches home, 100 Pis watch Bharat."
+> "One Pi watches home, 1000 Pis watch World."
