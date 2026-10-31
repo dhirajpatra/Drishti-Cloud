@@ -155,3 +155,12 @@ def run_pipeline(redis_c, agents) -> None:
     for stage, agent in (("raw_frames", "sam3-segmenter"), ("segmented", "ocr-reader"), ("perceived", "spark-multimodal"),
                          ("assessed", "wonder-reasoner"), ("decided", "image-alert"), ("proofed", "action-agent")):
         drain(redis_c, stage, agents[agent].handle)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_site_config():
+    """Tests monkeypatch `settings`; the admin-config cache must not carry values from one test to the next."""
+    from drishti import siteconfig
+    siteconfig.invalidate()
+    yield
+    siteconfig.invalidate()

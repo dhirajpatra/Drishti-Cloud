@@ -20,7 +20,7 @@ from .config import settings
 
 _pool: ConnectionPool | None = None
 
-TENANT_TABLES = ("events", "alerts", "actuations", "notes")
+TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -76,6 +76,26 @@ CREATE TABLE IF NOT EXISTS actuations (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS actuations_tenant_time ON actuations (tenant_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS site_config (
+  tenant_id  text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  camera_id  text NOT NULL DEFAULT '',          -- '' = the whole site, otherwise one camera
+  data       jsonb NOT NULL DEFAULT '{}',       -- sparse OVERRIDES of the defaults (see siteconfig.py)
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, camera_id)
+);
+CREATE TABLE IF NOT EXISTS camera_sources (
+  tenant_id    text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  camera_id    text NOT NULL,
+  scheme       text NOT NULL DEFAULT 'http',     -- http | https | rtsp | rtsps | file
+  host         text NOT NULL DEFAULT '',         -- IP or DNS name: the part that changes when the router hands out a new address
+  port         integer,
+  path         text NOT NULL DEFAULT '/',
+  username     text NOT NULL DEFAULT '',
+  password_enc text NOT NULL DEFAULT '',         -- Fernet-encrypted (vault.py), never returned by the API
+  enabled      boolean NOT NULL DEFAULT true,
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, camera_id)
+);
 CREATE TABLE IF NOT EXISTS notes (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id  text NOT NULL,
@@ -164,6 +184,81 @@ def tenants_with_stats() -> list[dict]:
             FROM tenants t ORDER BY t.created_at, t.id
             """
         ).fetchall()
+
+
+def update_tenant(tenant_id: str, name: str | None, location: str | None) -> dict | None:
+    with _conn(admin=True) as c:
+        return c.execute(
+            "UPDATE tenants SET name=COALESCE(%s,name), location=COALESCE(%s,location) WHERE id=%s RETURNING *",
+            (name, location, tenant_id),
+        ).fetchone()
+
+
+def set_sop(vertical: str, text: str) -> None:
+    """Operator edit (Admin page): replaces the stored SOP for the whole vertical."""
+    with _conn(admin=True) as c:
+        c.execute(
+            """INSERT INTO sop_docs (vertical, text) VALUES (%s,%s)
+               ON CONFLICT (vertical) DO UPDATE SET text=EXCLUDED.text, updated_at=now()""", (vertical, text))
+
+
+# ------------------------------------------------------------------ admin configuration
+def get_site_config(tenant_id: str, camera_id: str = "") -> dict:
+    with _conn(admin=True) as c:
+        row = c.execute("SELECT data FROM site_config WHERE tenant_id=%s AND camera_id=%s", (tenant_id, camera_id)).fetchone()
+    return row["data"] if row else {}
+
+
+def list_site_config_scopes(tenant_id: str) -> list[str]:
+    with _conn(admin=True) as c:
+        return [r["camera_id"] for r in c.execute("SELECT camera_id FROM site_config WHERE tenant_id=%s", (tenant_id,)).fetchall()]
+
+
+def set_site_config(tenant_id: str, camera_id: str, data: dict) -> None:
+    with _conn(admin=True) as c:
+        c.execute(
+            """INSERT INTO site_config (tenant_id, camera_id, data) VALUES (%s,%s,%s)
+               ON CONFLICT (tenant_id, camera_id) DO UPDATE SET data=EXCLUDED.data, updated_at=now()""",
+            (tenant_id, camera_id, Jsonb(data)),
+        )
+
+
+def delete_site_config(tenant_id: str, camera_id: str = "") -> int:
+    with _conn(admin=True) as c:
+        return c.execute("DELETE FROM site_config WHERE tenant_id=%s AND camera_id=%s", (tenant_id, camera_id)).rowcount
+
+
+def list_camera_sources(tenant_id: str | None = None) -> list[dict]:
+    with _conn(admin=True) as c:
+        if tenant_id:
+            return c.execute("""SELECT s.*, t.vertical FROM camera_sources s JOIN tenants t ON t.id = s.tenant_id
+                                WHERE s.tenant_id=%s ORDER BY s.camera_id""", (tenant_id,)).fetchall()
+        return c.execute("""SELECT s.*, t.vertical FROM camera_sources s JOIN tenants t ON t.id = s.tenant_id
+                            ORDER BY s.tenant_id, s.camera_id""").fetchall()
+
+
+def get_camera_source(tenant_id: str, camera_id: str) -> dict | None:
+    with _conn(admin=True) as c:
+        return c.execute("SELECT * FROM camera_sources WHERE tenant_id=%s AND camera_id=%s", (tenant_id, camera_id)).fetchone()
+
+
+def upsert_camera_source(tenant_id: str, camera_id: str, scheme: str, host: str, port: int | None, path: str,
+                         username: str, password_enc: str | None, enabled: bool) -> None:
+    """password_enc=None keeps the stored password; '' clears it."""
+    with _conn(admin=True) as c:
+        c.execute(
+            """INSERT INTO camera_sources (tenant_id, camera_id, scheme, host, port, path, username, password_enc, enabled)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,COALESCE(%s,''),%s)
+               ON CONFLICT (tenant_id, camera_id) DO UPDATE SET scheme=EXCLUDED.scheme, host=EXCLUDED.host, port=EXCLUDED.port,
+                 path=EXCLUDED.path, username=EXCLUDED.username, enabled=EXCLUDED.enabled, updated_at=now(),
+                 password_enc=CASE WHEN %s::text IS NULL THEN camera_sources.password_enc ELSE EXCLUDED.password_enc END""",
+            (tenant_id, camera_id, scheme, host, port, path, username, password_enc, enabled, password_enc),
+        )
+
+
+def delete_camera_source(tenant_id: str, camera_id: str) -> int:
+    with _conn(admin=True) as c:
+        return c.execute("DELETE FROM camera_sources WHERE tenant_id=%s AND camera_id=%s", (tenant_id, camera_id)).rowcount
 
 
 def upsert_sop(vertical: str, text: str) -> None:

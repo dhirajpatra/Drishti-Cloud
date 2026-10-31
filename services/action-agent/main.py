@@ -15,7 +15,7 @@ from datetime import datetime
 
 import httpx
 
-from drishti import bus, db, graph
+from drishti import bus, db, graph, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import RANK, VERTICALS
@@ -50,10 +50,11 @@ def whatsapp_body(to: str, text: str) -> dict:
     return {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text, "preview_url": False}}
 
 
-def deliver_whatsapp(payload: dict) -> str:
+def deliver_whatsapp(payload: dict, numbers: list[str] | None = None) -> str:
+    numbers = numbers or settings.whatsapp_to
     url = f"https://graph.facebook.com/{settings.whatsapp_api_version}/{settings.whatsapp_phone_id}/messages"
     ok = 0
-    for to in settings.whatsapp_to:
+    for to in numbers:
         try:
             resp = httpx.post(url, timeout=15, headers={"Authorization": f"Bearer {settings.whatsapp_token}"},
                               json=whatsapp_body(to, payload["message"]))
@@ -62,23 +63,26 @@ def deliver_whatsapp(payload: dict) -> str:
         except Exception as exc:  # noqa: BLE001
             body = getattr(getattr(exc, "response", None), "text", "")[:200]
             log.warning("WhatsApp to %s failed: %s %s", to[-4:], exc, body)
-    return "sent" if ok == len(settings.whatsapp_to) else ("partial" if ok else "failed")
+    return "sent" if ok == len(numbers) else ("partial" if ok else "failed")
 
 
-def whatsapp_enabled() -> bool:
-    return bool(settings.whatsapp_token and settings.whatsapp_phone_id and settings.whatsapp_to)
+def whatsapp_enabled(numbers: list[str] | None = None) -> bool:
+    return bool(settings.whatsapp_token and settings.whatsapp_phone_id and (numbers or settings.whatsapp_to))
 
 
-def deliver_remote(kind: str, payload: dict, p: dict) -> str:
-    if whatsapp_enabled():
-        status = deliver_whatsapp(payload)
-        if status == "sent" or not settings.notify_webhook_url:
+def deliver_remote(kind: str, payload: dict, p: dict, notify: dict | None = None) -> str:
+    """`notify` = the site's Admin settings: its own WhatsApp numbers / webhook win over the .env defaults."""
+    notify = notify or {}
+    numbers, hook = notify.get("whatsapp_to") or [], notify.get("webhook_url") or settings.notify_webhook_url
+    if whatsapp_enabled(numbers):
+        status = deliver_whatsapp(payload, numbers or None)
+        if status == "sent" or not hook:
             return status
-    if not settings.notify_webhook_url:
+    if not hook:
         log.info("[notify:%s] %s", kind, payload["message"])
         return "logged"
     try:
-        resp = httpx.post(settings.notify_webhook_url, timeout=10, json={
+        resp = httpx.post(hook, timeout=10, json={
             "text": f"{payload['message']} ({kind})", "kind": kind, "tenant_id": p["tenant_id"],
             "level": p["level"], "rule": p.get("rule"), "alert_id": payload["alert_id"]})
         resp.raise_for_status()
@@ -88,13 +92,13 @@ def deliver_remote(kind: str, payload: dict, p: dict) -> str:
         return "failed"
 
 
-def cooldown_allows(r, tid: str, rule: str, level: str) -> bool:
+def cooldown_allows(r, tid: str, rule: str, level: str, cooldown: int | None = None) -> bool:
     """One alert per (tenant, rule) per cooldown; a higher level always gets through."""
     key = f"cooldown:{tid}:{rule or 'llm'}"
     prev = r.get(key)
     if prev and RANK.get(prev, 0) >= RANK[level]:
         return False
-    r.set(key, level, ex=settings.alert_cooldown_sec)
+    r.set(key, level, ex=max(1, settings.alert_cooldown_sec if cooldown is None else cooldown))
     return True
 
 
@@ -106,9 +110,10 @@ def handle(p: dict, r) -> None:
                   p.get("rationale", ""), labels, p.get("ts"))
 
     alert = None
-    if level != "NORMAL" and cooldown_allows(r, tid, p.get("rule", ""), level):
+    cfg = siteconfig.effective(tid, p.get("camera_id", "cam_1"), vertical)
+    if level != "NORMAL" and cooldown_allows(r, tid, p.get("rule", ""), level, p.get("cooldown_sec")):
         image = bus.get_proof(p["frame_id"]) if p.get("has_proof") else None
-        kinds = VERTICALS[vertical]["policy"][level]
+        kinds = cfg["notify"]["policy"].get(level) or VERTICALS[vertical]["policy"][level]
         alert_id = db.save_alert(tid, vertical, level, p.get("rule", ""), p.get("reason", ""), p.get("rationale", ""),
                                  p.get("speak_text", ""), labels, kinds, p["frame_id"], image)
         alert = {"id": alert_id, "reason": p.get("reason", ""), "speak_text": p.get("speak_text", "")}
@@ -120,7 +125,7 @@ def handle(p: dict, r) -> None:
                 r.rpush(key, json.dumps({"id": act_id, "kind": kind, "payload": payload, "alert_id": alert_id}))
                 r.ltrim(key, -100, -1)
             else:
-                status = deliver_remote(kind, payload, p)
+                status = deliver_remote(kind, payload, p, cfg["notify"])
                 db.save_actuation(tid, alert_id, kind, payload, status)
         try:
             bus.notify(tid, "alert", "CRITICAL" if level == "CRITICAL" else "WARNING", f"{level}: {p.get('reason', '')}",
@@ -147,6 +152,8 @@ def camera_watchdog_once(r, now: float | None = None) -> int:
     for t in db.all_tenants():
         for cam in bus.list_cameras(t["id"]):
             if not cam.get("updated_at"):
+                continue
+            if not siteconfig.effective(t["id"], cam["camera_id"], t["vertical"])["notify"]["camera_health"]:
                 continue
             age = now - datetime.fromisoformat(cam["updated_at"]).timestamp()
             flag = f"camoffline:{t['id']}:{cam['camera_id']}"

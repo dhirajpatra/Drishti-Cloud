@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from drishti import bus, db, graph
+from drishti import bus, db, graph, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 
@@ -257,22 +257,25 @@ _HAZARD_RE = {lvl: re.compile(r"\b(" + "|".join(re.escape(w) for w in words) + r
               for lvl, words in (("CRITICAL", HAZARD_CRITICAL), ("WARNING", HAZARD_WARNING))}
 
 
-def hazard(headline: str) -> tuple[str, str] | None:
+def hazard(headline: str, extra: list[str] | None = None) -> tuple[str, str] | None:
     """(level, matched word) when a headline looks like something a security system should surface, else None."""
     for lvl in ("CRITICAL", "WARNING"):
         m = _HAZARD_RE[lvl].search(headline or "")
         if m:
             return lvl, m.group(1).lower()
+    for w in extra or []:                                          # words the owner added in the Admin page
+        if re.search(r"\b" + re.escape(w) + r"\b", headline or "", re.I):
+            return "WARNING", w
     return None
 
 
-def notify_hazards(tid: str, city: str, items: list[dict]) -> int:
+def notify_hazards(tid: str, city: str, items: list[dict], extra: list[str] | None = None) -> int:
     """Dashboard notification for every LOCAL hazard headline (national filler is context only). De-duplicated per headline."""
     sent = 0
     for n in items:
         if "(national)" in n["source"]:
             continue
-        hz = hazard(n["headline"])
+        hz = hazard(n["headline"], extra)
         if hz and bus.notify(tid, "news", hz[0], f"Local news ({city}): {n['headline']}", f"{n['source']} · matched '{hz[1]}'",
                              n.get("url"), key=hashlib.sha1(n["headline"].encode()).hexdigest()[:16]):
             sent += 1
@@ -301,7 +304,8 @@ def tick() -> None:
                 log.info("news for %s (%s): %d item(s)", t["id"], loc, len(cache[loc]))
             for n in cache[loc]:
                 graph.add_news(t["id"], n["headline"], n["source"], n.get("url"), n["ts"])
-            if notify_hazards(t["id"], loc, cache[loc]):
+            nc = siteconfig.effective(t["id"], "", t["vertical"])["notify"]
+            if nc["news_hazards"] and notify_hazards(t["id"], loc, cache[loc], nc["extra_hazard_words"]):
                 log.info("hazard news notification(s) raised for %s", t["id"])
         except NewsAuthError as exc:
             log.error("news disabled until next refresh: %s", exc)

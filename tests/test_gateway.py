@@ -204,8 +204,8 @@ def test_register_list_and_remove_camera_feed(client, redis_c):
     assert client.post("/tenants/school_1/feeds", json={"camera_id": "hall", "url": "http://192.168.1.7:8081/"}).status_code == 201
     assert client.get("/tenants/school_1/feeds").json() == [
         {"camera_id": "gate", "url": "rtsp://***@10.0.0.9/stream1"}, {"camera_id": "hall", "url": "http://192.168.1.7:8081/"}]
-    from drishti import bus
-    feeds = bus.registered_feeds()
+    from drishti import siteconfig
+    feeds = siteconfig.all_feeds("")
     assert {(f["tenant"], f["camera"], f["vertical"]) for f in feeds} == {("school_1", "gate", "school_children"), ("school_1", "hall", "school_children")}
     assert feeds[0]["url"].startswith("rtsp://admin:s3cret@")                  # the ingestor needs the real credentials
     assert client.get("/tenants/mall_1/feeds").json() == []                    # tenant scoped
@@ -222,6 +222,8 @@ def test_feed_url_validation_rejects_unsafe_or_unreadable_sources(client, url):
 def test_feed_accepts_hls_and_local_mp4(client):
     assert client.post("/tenants/mall_1/feeds", json={"camera_id": "hls", "url": "https://cdn.example.com/live/index.m3u8"}).status_code == 201
     assert client.post("/tenants/mall_1/feeds", json={"camera_id": "mp4", "url": "/app/feeds/mall.mp4"}).status_code == 201
+    for c in ("hls", "mp4"):
+        client.delete(f"/tenants/mall_1/feeds/{c}")
 
 
 # --------------------------------------------------------------------------- motionEye web hook
@@ -277,5 +279,7 @@ def test_storyboard_can_be_switched_off_and_bad_burst_frames_are_ignored(client,
                     files=[("file", ("f.jpg", _scene(blob=(80, 60, 200, 200)), "image/jpeg")), ("burst", ("x.jpg", b"junk", "image/jpeg"))])
     assert r.status_code == 200 and bus.get_story(r.json()["frame_id"]) is not None     # junk burst frame skipped, BEFORE + NOW kept
     monkeypatch.setattr(settings, "storyboard", False)
+    from drishti import siteconfig
+    siteconfig.invalidate()
     r = client.post("/ingest/mall_1", data={"camera_id": "a", "force": "true"}, files={"file": ("f.jpg", _scene(brightness=40), "image/jpeg")})
     assert bus.get_story(r.json()["frame_id"]) is None

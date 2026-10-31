@@ -120,7 +120,43 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 export interface FeedInfo { camera_id: string; url: string }
 export interface CameraInfo { camera_id: string; updated_at: string | null }
 
+export interface RuleCfg { enabled: boolean; level: AlertLevel | null; cooldown_sec: number | null; hours: [number, number] | null }
+export interface CustomRule { id: string; text: string; level: AlertLevel; enabled: boolean; hours: [number, number] | null }
+export interface LabelRule { id: string; label: string; op: "present" | "absent" | "count_gte"; value: number; for_sec: number; level: AlertLevel; message: string; enabled: boolean; hours: [number, number] | null }
+export interface SiteCfg {
+  rules: Record<string, RuleCfg>;
+  thresholds: Record<string, number>;
+  sampling: { sample_interval_sec: number; change_fraction: number; min_analysis_gap_sec: number; burst_frames: number; storyboard: boolean };
+  notify: { policy: Record<AlertLevel, string[]>; whatsapp_to: string[]; webhook_url: string; news_hazards: boolean; camera_health: boolean; extra_hazard_words: string[] };
+  custom_rules: CustomRule[]; label_rules: LabelRule[]; instructions: string;
+}
+export interface Catalog {
+  vertical: VerticalId; vertical_label: string; levels: AlertLevel[]; action_kinds: string[]; schemes: string[];
+  rules: { id: string; label: string; description: string; default_level: AlertLevel }[];
+  thresholds: { key: string; label: string; unit: string; min: number; max: number }[];
+}
+export interface AdminConfig { scope: string; camera: string; defaults: SiteCfg; overrides: Partial<SiteCfg>; effective: SiteCfg; catalog: Catalog; sop: string }
+export interface AdminCamera { camera_id: string; source: "database" | "env" | "edge"; enabled: boolean; last_frame: string | null; level: string | null; ok: boolean | null; error: string; customised: boolean }
+export interface AdminTenant { id: string; name: string; location: string; vertical: VerticalId; vertical_label: string; customised: boolean; cameras: AdminCamera[] }
+export interface AdminOverview { tenants: AdminTenant[]; auth_required: boolean; secrets_key_custom: boolean; whatsapp_configured: boolean; default_whatsapp_numbers: number; default_webhook: boolean }
+export interface CameraConn { camera_id: string; scheme: string; host: string; port: number | null; path: string; username: string; has_password: boolean; enabled: boolean; source: string }
+export interface CameraForm extends Omit<CameraConn, "camera_id" | "has_password" | "source"> { password?: string; clear_password?: boolean }
+export interface TestResult { ok: boolean; bytes: number; error: string; preview?: string }
+const T = (id: string) => `/admin/tenants/${encodeURIComponent(id)}`;
+const Q = (cam: string) => (cam ? `?camera=${encodeURIComponent(cam)}` : "");
+
 export const api = {
+  adminOverview: () => json<AdminOverview>("/admin/overview"),
+  adminConfig: (id: string, cam: string) => json<AdminConfig>(`${T(id)}/config${Q(cam)}`),
+  saveAdminConfig: (id: string, cam: string, config: SiteCfg) => json<AdminConfig>(`${T(id)}/config${Q(cam)}`, jsonInit("PUT", { config })),
+  resetAdminConfig: (id: string, cam: string) => json<{ ok: true }>(`${T(id)}/config${Q(cam)}`, { method: "DELETE" }),
+  adminCamera: (id: string, cam: string) => json<CameraConn>(`${T(id)}/cameras/${encodeURIComponent(cam)}`),
+  saveAdminCamera: (id: string, cam: string, b: CameraForm) => json<CameraConn>(`${T(id)}/cameras/${encodeURIComponent(cam)}`, jsonInit("PUT", b)),
+  deleteAdminCamera: (id: string, cam: string) => json<{ ok: true }>(`${T(id)}/cameras/${encodeURIComponent(cam)}`, { method: "DELETE" }),
+  testAdminCamera: (id: string, cam: string, b: CameraForm | Record<string, never>) => json<TestResult>(`${T(id)}/cameras/${encodeURIComponent(cam)}/test`, jsonInit("POST", b)),
+  saveAdminSite: (id: string, b: { name?: string; location?: string }) => json<{ id: string; name: string; location: string }>(`${T(id)}/site`, jsonInit("PUT", b)),
+  saveAdminSop: (id: string, text: string) => json<{ ok: true; note: string }>(`${T(id)}/sop`, jsonInit("PUT", { text })),
+
   health: () => json<Health>("/health"),
   verticals: () => json<Vertical[]>("/verticals"),
   tenants: () => json<Tenant[]>("/tenants"),

@@ -4,10 +4,11 @@ import { api, getToken, onUnauthorized, setToken } from "./api";
 import { usePoll } from "./lib";
 import Dashboard from "./pages/Dashboard";
 import Architecture from "./pages/Architecture";
+import Admin from "./pages/Admin";
 import { Pill, btnPrimary, inputStyle } from "./components/ui";
 
-type Tab = "dashboard" | "architecture";
-const tabFromHash = (): Tab => (window.location.hash === "#architecture" ? "architecture" : "dashboard");
+type Tab = "dashboard" | "admin" | "architecture";
+const tabFromHash = (): Tab => (window.location.hash === "#architecture" ? "architecture" : window.location.hash === "#admin" ? "admin" : "dashboard");
 
 function TokenPrompt({ onDone }: { onDone: () => void }) {
   const [val, setVal] = useState(getToken());
@@ -68,7 +69,7 @@ export default function App() {
             </div>
           </div>
           <nav className="flex gap-1 mono text-[11px] tracking-widest">
-            {(["dashboard", "architecture"] as Tab[]).map((t) => (
+            {(["dashboard", "admin", "architecture"] as Tab[]).map((t) => (
               <button key={t} onClick={() => go(t)} className="px-3 py-1.5 rounded-lg border uppercase"
                 style={{ borderColor: tab === t ? "var(--accent)" : "var(--line)", color: tab === t ? "var(--accent)" : "var(--muted)", background: tab === t ? "var(--surface2)" : "transparent" }}>{t}</button>
             ))}
@@ -79,7 +80,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      {tab === "dashboard" ? <main className="max-w-7xl mx-auto px-4"><Dashboard /></main> : <Architecture />}
+      {tab === "dashboard" ? <main className="max-w-7xl mx-auto px-4"><Dashboard /></main> : tab === "admin" ? <main className="max-w-7xl mx-auto px-4 pb-10"><Admin /></main> : <Architecture />}
     </div>
   );
 }

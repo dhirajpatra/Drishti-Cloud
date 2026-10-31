@@ -77,9 +77,51 @@ def effective_hour(p: dict, now_hour: int) -> int:
     return now_hour
 
 
-def _is_night(hour: int) -> bool:
-    s, e = settings.night_start_hour, settings.night_end_hour
+def _is_night(hour: int, cfg: dict | None = None) -> bool:
+    th = (cfg or {}).get("thresholds") or {}
+    s, e = th.get("night_start_hour", settings.night_start_hour), th.get("night_end_hour", settings.night_end_hour)
     return hour >= s or hour < e
+
+
+def _in_hours(hours: list[int] | None, hour: int) -> bool:
+    if not hours:
+        return True
+    a, b = hours
+    return a <= hour < b if a < b else (hour >= a or hour < b)
+
+
+def apply_overrides(hits: list[dict], cfg: dict, hour: int) -> list[dict]:
+    """Admin settings on top of the built-in rules: switch off, change level, restrict to hours, per-alarm cooldown."""
+    out = []
+    for h in hits:
+        rc = (cfg.get("rules") or {}).get(h["rule"])
+        if rc:
+            if rc.get("enabled") is False or not _in_hours(rc.get("hours"), hour):
+                continue
+            h = {**h, "level": rc.get("level") or h["level"]}
+            if rc.get("cooldown_sec") is not None:
+                h["cooldown_sec"] = rc["cooldown_sec"]
+        out.append(h)
+    return out
+
+
+def label_rule_hits(cfg: dict, p: dict, r: redis.Redis, labels: list[str], hour: int, now: float) -> list[dict]:
+    """Admin 'object rules': deterministic conditions on detected labels, optionally held for N seconds."""
+    tid, cam = p["tenant_id"], p.get("camera_id", "cam_1")
+    out = []
+    for lr in cfg.get("label_rules") or []:
+        if not lr.get("enabled", True):
+            continue
+        n = labels.count(lr["label"])
+        cond = {"present": n >= 1, "absent": n == 0, "count_gte": n >= lr["value"]}[lr["op"]]
+        held = _set_since(r, f"rstate:{tid}:{cam}:lr:{lr['id']}", cond, now)
+        if held is None or not _in_hours(lr.get("hours"), hour):
+            continue
+        if _elapsed(p, f"lr_{lr['id']}", held) < lr.get("for_sec", 0):
+            continue
+        out.append({**_hit(f"obj_{lr['id']}", lr["level"], f"{lr['message']} ({cam})", [lr["label"]], lr["message"]),
+                    "custom": True})
+    return out
 
 
 def _set_since(r: redis.Redis, key: str, present: bool, now: float) -> float | None:
@@ -91,7 +133,7 @@ def _set_since(r: redis.Redis, key: str, present: bool, now: float) -> float | N
     return now - float(r.get(key) or now)
 
 
-def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict]:
+def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int, cfg: dict | None = None) -> list[dict]:
     """p is the `perceived` payload: tenant_id, camera_id, sensors, objects[], ocr_texts[]."""
     tid, cam = p["tenant_id"], p.get("camera_id", "cam_1")
     sensors: dict[str, Any] = p.get("sensors") or {}
@@ -102,6 +144,11 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
     hour = effective_hour(p, now_hour)
     persons = labels.count("person") + labels.count("child")
     out: list[dict] = []
+    cfg = cfg or {}
+    th = cfg.get("thresholds") or {}
+
+    def T(name: str):
+        return th.get(name, getattr(settings, name))
 
     # ---- shared state: last motion (PIR) and last staff sighting
     # NX = start the clock the first time we see a tenant, so "never moves" still alerts after the threshold
@@ -131,12 +178,12 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
 
     if vertical == "mall_security":
         crowd = persons
-        if crowd > settings.crowd_threshold:
-            out.append(_hit("crowd_density", "ALERT", f"Crowd of {crowd} people in {cam} exceeds {settings.crowd_threshold}",
+        if crowd > T("crowd_threshold"):
+            out.append(_hit("crowd_density", "ALERT", f"Crowd of {crowd} people in {cam} exceeds {T("crowd_threshold")}",
                             ["person"], "Please keep moving and use all exits calmly."))
         bag_held = _set_since(r, f"rstate:{tid}:{cam}:bag_alone", "bag" in labels and persons == 0, now)
         held = _elapsed(p, "unattended_bag", bag_held or 0.0) if "bag" in labels else 0.0
-        if "bag" in labels and held >= settings.unattended_bag_sec:
+        if "bag" in labels and held >= T("unattended_bag_sec"):
             out.append(_hit("unattended_bag", "ALERT", f"Bag left unattended for {int(held)}s in {cam}", ["bag"],
                             "Unattended bag detected. Security is on the way."))
         if "restricted_door" in labels and persons > 0 and "staff" not in labels:
@@ -153,11 +200,11 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
         last_motion = r.get(f"rstate:{tid}:last_motion")
         quiet = now - float(last_motion) if last_motion else 0.0
         quiet = _elapsed(p, "no_motion", quiet)
-        if sensors.get("pir") is not True and quiet >= settings.no_motion_sec and not _is_night(hour):
+        if sensors.get("pir") is not True and quiet >= T("no_motion_sec") and not _is_night(hour, cfg):
             out.append(_hit("no_motion_2h", "ALERT", f"No motion for {int(quiet // 60)} minutes", [],
                             "I have not seen you move for a while. Are you alright?"))
         door = sensors.get("us_door")
-        if isinstance(door, (int, float)) and door >= settings.door_open_cm and _is_night(hour):
+        if isinstance(door, (int, float)) and door >= T("door_open_cm") and _is_night(hour, cfg):
             out.append(_hit("door_open_night", "ALERT", f"Front door open at night ({int(door)} cm clearance, {hour:02d}:00)",
                             ["door"], "The front door seems open. Is everything okay?"))
         if "stove" in labels and persons == 0:
@@ -167,7 +214,7 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
     elif vertical == "school_children":
         kids = labels.count("child")
         adults = persons - kids if persons >= kids else 0
-        if kids >= 1 and adults == 0 and "staff" not in labels and "corridor" in labels and settings.school_hours_start <= hour < settings.school_hours_end:
+        if kids >= 1 and adults == 0 and "staff" not in labels and "corridor" in labels and T("school_hours_start") <= hour < T("school_hours_end"):
             out.append(_hit("child_alone_corridor", "ALERT", "A child is alone in the corridor during class time",
                             ["child", "corridor"], "Please return to your classroom."))
         if adults >= 1 and "badge" not in labels and "staff" not in labels:
@@ -176,7 +223,7 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
                             "Adult without a visible school badge" + (" near children" if near else ""),
                             ["person"], "Visitors please report to the front office."))
         if "gate_open" in labels or ("gate" in labels and sensors.get("gate_open") is True):
-            if settings.school_hours_start <= hour < settings.school_hours_end and "staff" not in labels:
+            if T("school_hours_start") <= hour < T("school_hours_end") and "staff" not in labels:
                 out.append(_hit("gate_open_class_time", "ALERT", "Main gate open during class hours with no staff at the gate",
                                 ["gate"], "The school gate is open. Staff please attend."))
         if kids >= 4 and sensors.get("cluster") is True:
@@ -200,7 +247,8 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
         last_staff = r.get(f"rstate:{tid}:last_staff")
         absent = (now - float(last_staff)) if last_staff else 0.0
         absent = _elapsed(p, "staff_absent", absent)
-        if absent >= settings.staff_absent_sec and "staff" not in labels:
+        if absent >= T("staff_absent_sec") and "staff" not in labels:
             out.append(_hit("staff_absent_1h", "ALERT", f"No staff seen at the bedside for {int(absent // 60)} minutes", [],
                             "Bedside check is overdue."))
-    return out
+    out += label_rule_hits(cfg, p, r, labels, hour, now)
+    return apply_overrides(out, cfg, hour) if cfg else out

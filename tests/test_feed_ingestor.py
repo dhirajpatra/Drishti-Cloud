@@ -52,29 +52,37 @@ def test_feed_spec_parsing():
                   "url": "http://192.168.1.4:8765/picture/1/current/"}]
 
 
-def test_dashboard_registered_feeds_are_sampled_and_override_env(monkeypatch, redis_c):
-    from drishti import bus
-    redis_c.flushdb()
-    bus.put_feed("home_1_bangalore", "kitchen", "home_seniors", "http://new-url/", redis_c)
-    bus.put_feed("school_1", "gate", "school_children", "rtsp://gate/1", redis_c)
-    env = fi.parse_feeds("home_1_bangalore:home_seniors:kitchen=http://old-url/,mall_1:mall_security:cam_1=rtsp://m/1")
-    merged = {(f["tenant"], f["camera"]): f for f in env}
-    merged.update({(f["tenant"], f["camera"]): f for f in bus.registered_feeds()})
-    assert merged[("home_1_bangalore", "kitchen")]["url"] == "http://new-url/" and len(merged) == 3
+def test_saved_cameras_override_env_and_disabled_ones_are_dropped(monkeypatch):
+    from drishti import db, siteconfig
+    monkeypatch.setenv("RTSP_FEEDS", "mall_1:mall_security:cam_1=http://old/,mall_1:mall_security:cam_2=http://two/")
+    db.upsert_camera_source("mall_1", "cam_1", "http", "10.0.0.9", 8081, "/pic/", "", None, True)
+    db.upsert_camera_source("mall_1", "cam_2", "http", "10.0.0.8", None, "/", "", None, False)
+    feeds = fi.all_feeds()
+    assert feeds[("mall_1", "cam_1")]["url"] == "http://10.0.0.9:8081/pic/"
+    assert ("mall_1", "cam_2") not in feeds                       # switched off in the Admin page
+    db.delete_camera_source("mall_1", "cam_1"); db.delete_camera_source("mall_1", "cam_2")
 
 
-def test_motion_trigger_grabs_the_named_feed_with_pir_true(monkeypatch, redis_c):
+def test_motion_trigger_grabs_the_named_feed_with_pir_true(monkeypatch):
     import json
-    from drishti import bus
-    redis_c.flushdb()
-    bus.put_feed("school_1", "gate", "school_children", "rtsp://gate/1", redis_c)
-    env = fi.parse_feeds("home_1_bangalore:home_seniors:kitchen=http://192.168.1.4:8081/")
+    from drishti import db
+    monkeypatch.setenv("RTSP_FEEDS", "home_1_bangalore:home_seniors:kitchen=http://192.168.1.4:8081/")
+    db.upsert_camera_source("school_1", "gate", "rtsp", "10.1.1.1", None, "/s", "", None, True)
     pushed = []
     monkeypatch.setattr(fi, "push", lambda feed, sensors=None, burst=1: pushed.append((feed["camera"], sensors)))
-    assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "kitchen"}), env) is True
-    assert fi.handle_trigger(json.dumps({"tenant": "school_1", "camera": "gate"}), env) is True      # dashboard-registered camera
-    assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "attic"}), env) is False
+    assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "kitchen"})) is True
+    assert fi.handle_trigger(json.dumps({"tenant": "school_1", "camera": "gate"})) is True      # Admin-saved camera
+    assert fi.handle_trigger(json.dumps({"tenant": "home_1_bangalore", "camera": "attic"})) is False
     assert pushed == [("kitchen", {"source": "motioneye_hook", "pir": True}), ("gate", {"source": "motioneye_hook", "pir": True})]
+    db.delete_camera_source("school_1", "gate")
+
+
+def test_each_camera_is_sampled_at_its_own_interval():
+    fi._due.clear()
+    feeds = {("t", "a"): {"interval": 30}, ("t", "b"): {"interval": 300}}
+    assert len(fi.due_feeds(feeds, 1000.0)) == 2
+    assert [f["interval"] for f in fi.due_feeds(feeds, 1031.0)] == [30]
+    assert fi.due_feeds(feeds, 1032.0) == []
 
 
 def test_burst_posts_the_newest_frame_as_main_and_earlier_ones_as_burst(monkeypatch):
