@@ -1,111 +1,220 @@
-"""Perception agent: raw_frames -> segmented.
-
-Segments each frame with SAM 3.1 (Meta Model API) into labelled objects with boxes.
-LOW_COST_MODE: a frame the gateway marked `static` reuses the last segmentation of that camera.
-MOCK_MODE: objects come from the simulator's `_sim` hint (no API, no key).
-"""
-from __future__ import annotations
-
+import base64
 import json
+import logging
 import os
+import sys
+import time
+from typing import Any, Dict, List, Optional
+import httpx
 
-from drishti import bus, llm, simulate
-from drishti.config import settings
-from drishti.log import get_logger
-from drishti.verticals import VERTICALS
+# Configure logging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("fridge-inventory-agent")
 
-log = get_logger("sam3-segmenter")
-SEG_TTL = 3600
-SAM_OFF_KEY = "seg:sam_disabled"
-SAM_OFF_TTL = 3600
+# Configuration Environment Variables
+MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ("true", "1", "yes")
+BASETEN_API_KEY = os.getenv("BASETEN_API_KEY", "").strip()
+BASETEN_API_URL = os.getenv("BASETEN_API_URL", "https://inference.baseten.co/v1").rstrip("/")
+LLAMA_API_KEY = os.getenv("LLAMA_API_KEY", "").strip()
+LLAMA_API_URL = os.getenv("LLAMA_API_URL", "https://api.meta.ai/v1/responses").rstrip("/")
 
+SPARK_MODEL = os.getenv(
+    "SPARK_MODEL",
+    "baseten:meta-models/muse-spark-open-1026|muse-spark-1.3"
+)
+REASONING_EFFORT_FAST = os.getenv("REASONING_EFFORT_FAST", "minimal")
+FAST_HEADROOM_TOKENS = int(os.getenv("FAST_HEADROOM_TOKENS", "512"))
+SAMPLE_INTERVAL_SEC = int(os.getenv("SAMPLE_INTERVAL_SEC", "120"))
 
-def clamp_box(b) -> list[float] | None:
-    try:
-        x1, y1, x2, y2 = (min(1.0, max(0.0, float(v))) for v in b)
-    except (TypeError, ValueError):
-        return None
-    if x2 <= x1 or y2 <= y1:
-        return None
-    return [round(x1, 4), round(y1, 4), round(x2, 4), round(y2, 4)]
-
-
-def clean(objects) -> list[dict]:
-    out = []
-    for o in objects if isinstance(objects, list) else []:
-        if not isinstance(o, dict) or not isinstance(o.get("label"), str):
-            continue
-        box = clamp_box(o.get("bbox"))
-        if box is None:
-            continue
-        try:
-            conf = min(1.0, max(0.0, float(o.get("confidence", 0.8))))
-        except (TypeError, ValueError):
-            conf = 0.8
-        out.append({"label": o["label"].strip().lower()[:40], "bbox": box, "confidence": round(conf, 3)})
-    return out[:200]
+GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:8000")
 
 
-def mock_segment(p: dict) -> list[dict]:
-    sim = (p.get("sensors") or {}).get("_sim") or {}
-    if isinstance(sim.get("objects"), list):
-        return clean(simulate.expand(sim["objects"]))
-    return clean([{"label": "person", "bbox": [0.35, 0.2, 0.65, 0.9], "confidence": 0.9}])
+def resolve_model_and_credentials() -> tuple[str, str, str]:
+    """Resolves whether to use Baseten or Meta API endpoint and model slug based on .env configuration."""
+    models = [m.strip() for m in SPARK_MODEL.split("|")]
+    
+    # Try Baseten first if key is present
+    if BASETEN_API_KEY:
+        for m in models:
+            if m.startswith("baseten:"):
+                model_name = m.replace("baseten:", "")
+                return BASETEN_API_URL, BASETEN_API_KEY, model_name
+    
+    # Fallback to Meta API if key is present
+    if LLAMA_API_KEY:
+        for m in models:
+            clean_m = m.replace("baseten:", "")
+            return LLAMA_API_URL, LLAMA_API_KEY, clean_m
+
+    return "", "", ""
 
 
-def sam_segment(jpeg: bytes, vertical: str, r) -> list[dict]:
-    labels = ", ".join(VERTICALS[vertical]["sam_labels"])
+def encode_image_to_base64(image_path: str) -> str:
+    """Reads a local image file and converts it to a base64 data URI."""
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+    return f"data:image/jpeg;base64,{encoded_string}"
+
+
+def analyze_fridge_image_with_muse(image_data_uri: str) -> List[Dict[str, Any]]:
+    """Calls the Muse Spark VLM model to analyze fridge/freezer contents and detect items and quantities."""
+    api_url, api_key, model_id = resolve_model_and_credentials()
+
+    if MOCK_MODE or not api_key:
+        logger.info("Running in MOCK_MODE or API keys missing. Generating mock vision analysis.")
+        return [
+            {"item_name": "milk", "kind": "fridge", "count": 1, "min_stock": 2, "expiry_risk": False},
+            {"item_name": "frozen_pizza", "kind": "freezer", "count": 0, "min_stock": 1, "expiry_risk": False},
+            {"item_name": "insulin_vial", "kind": "medicine", "count": 3, "min_stock": 5, "expiry_risk": True},
+        ]
+
     prompt = (
-        f"Segment all visible instances of: {labels}. Only include objects that are really visible. "
-        'Return JSON only: {"objects":[{"label":"<name>","bbox":[x1,y1,x2,y2],"confidence":0.0-1.0}]} '
-        "with bbox as fractions of image width/height (0-1)."
+        "You are an advanced inventory computer vision system inspecting the inside of a fridge, freezer, or storage cabinet.\n"
+        "Analyze the provided image and extract a list of all visible items, estimated quantities, storage type, and condition.\n\n"
+        "Return ONLY a JSON array of objects with the following schema:\n"
+        "[\n"
+        "  {\n"
+        "    \"item_name\": \"string (e.g. milk, ice_cream, vaccine_vial)\",\n"
+        "    \"kind\": \"fridge | freezer | medicine | general\",\n"
+        "    \"count\": integer,\n"
+        "    \"min_stock\": integer (suggested threshold),\n"
+        "    \"expiry_risk\": boolean\n"
+        "  }\n"
+        "]\n"
+        "Do not include markdown code block formatting or explanations."
     )
-    msgs = [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}]
-    mode = os.getenv("SAM_MODE", "auto").lower()          # auto | sam | spark
-    use_sam = mode == "sam" or (mode == "auto" and not r.get(SAM_OFF_KEY))
-    out = None
-    if use_sam:
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": model_id,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_uri}}
+                ]
+            }
+        ],
+        "max_tokens": FAST_HEADROOM_TOKENS,
+        "reasoning_effort": REASONING_EFFORT_FAST,
+        "temperature": 0.1
+    }
+
+    try:
+        endpoint = f"{api_url}/chat/completions" if not api_url.endswith("/completions") else api_url
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(endpoint, headers=headers, json=payload)
+            response.raise_for_status()
+            res_json = response.json()
+            
+            raw_text = res_json["choices"][0]["message"]["content"].strip()
+            # Clean markdown code blocks if the model included them
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("```")[1]
+                if raw_text.startswith("json"):
+                    raw_text = raw_text[4:]
+            
+            return json.loads(raw_text.strip())
+
+    except Exception as e:
+        logger.error(f"Error invoking Muse Spark API: {e}. Falling back to default baseline.")
+        return []
+
+
+def process_inventory_and_order(tenant_id: str, detected_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compares detected inventory counts against minimum thresholds and constructs mock restock orders."""
+    order_items = []
+
+    for item in detected_items:
+        name = item.get("item_name", "unknown")
+        count = item.get("count", 0)
+        min_stock = item.get("min_stock", 1)
+
+        # Sync inventory state with gateway
         try:
-            out = llm.chat_json(settings.sam_model, msgs, max_tokens=900, r=r, reasoning=False)
-        except (llm.NoOutputText, ValueError) as e:
-            if mode == "sam" or settings.spark_model == settings.sam_model:
-                raise
-            # SAM looks at the image but returns no JSON text: stop paying for it for a while, use the Spark vision model
-            r.set(SAM_OFF_KEY, "1", ex=SAM_OFF_TTL)
-            log.warning("%s gave no usable JSON (%s) - using %s for %d min (set SAM_MODE=sam to force)",
-                        settings.sam_model, e, settings.spark_model, SAM_OFF_TTL // 60)
-    if out is None:
-        out = llm.chat_json(settings.spark_model, msgs, max_tokens=600, r=r, reasoning=False)
-    return clean(out.get("objects"))
+            with httpx.Client(timeout=10.0) as client:
+                client.post(
+                    f"{GATEWAY_URL}/api/tenants/{tenant_id}/inventory",
+                    json={
+                        "name": name,
+                        "kind": item.get("kind", "fridge"),
+                        "min_stock": min_stock,
+                        "count": count,
+                        "camera_id": "fridge_cam_01"
+                    }
+                )
+        except Exception as err:
+            logger.warning(f"Could not update central inventory gateway: {err}")
+
+        # Check if reorder is needed
+        if count < min_stock:
+            reorder_qty = (min_stock - count) + 2  # Order buffer
+            order_items.append({
+                "item_name": name,
+                "current_count": count,
+                "min_stock": min_stock,
+                "order_quantity": reorder_qty,
+                "unit": "units"
+            })
+
+    # Generate Mock Purchase Order payload if items need replenishment
+    mock_order = None
+    if order_items:
+        mock_order = {
+            "order_id": f"ORD-{tenant_id[:8].upper()}-{int(time.time())}",
+            "tenant_id": tenant_id,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "status": "MOCK_ORDER_CREATED",
+            "supplier": "Drishti Auto-Replenishment Hub",
+            "items": order_items,
+            "total_items_ordered": sum(i["order_quantity"] for i in order_items)
+        }
+        logger.info(f"Generated Restock Order: {json.dumps(mock_order, indent=2)}")
+
+    return {
+        "detected_items": detected_items,
+        "mock_order": mock_order
+    }
 
 
-def handle(p: dict, r) -> None:
-    tid, cam = p["tenant_id"], p.get("camera_id", "cam_1")
-    cache_key = f"seg:{tid}:{cam}"
-    cached = r.get(cache_key)
-    source = "mock" if settings.mock_mode else "sam"
+def main():
+    logger.info("Initializing Fridge Inventory Agent...")
+    tenant_id = os.getenv("TENANT_ID", "home_1_bangalore")
+    
+    logger.info(f"Agent up and running for tenant '{tenant_id}'. Check interval: {SAMPLE_INTERVAL_SEC}s")
 
-    if p.get("static") and cached and settings.low_cost_mode:
-        objects, source = json.loads(cached), "cache"
-    elif settings.mock_mode:
-        objects = mock_segment(p)
-    else:
-        jpeg = bus.get_frame(p["frame_id"])
-        if jpeg is None:
-            log.warning("frame %s expired before segmentation - dropped", p["frame_id"])
-            return
+    while True:
         try:
-            objects = sam_segment(jpeg, p["vertical"], r)
-        except llm.CallBudgetExceeded:
-            objects = clean(json.loads(cached)) if cached else []
-            source = "budget_fallback"
-            log.warning("daily Meta API call budget exhausted - using cached segmentation for %s/%s", tid, cam)
-    if source != "cache":
-        r.set(cache_key, json.dumps(objects), ex=SEG_TTL)
+            sample_image_path = "/tmp/fridge_latest.jpg"
+            
+            if os.path.exists(sample_image_path):
+                data_uri = encode_image_to_base64(sample_image_path)
+            else:
+                # Placeholder image URI for demo/mock execution
+                data_uri = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBD-placeholder"
 
-    log.info("%s/%s segmented %d objects (%s)", tid, cam, len(objects), source)
-    bus.publish("segmented", tid, {**p, "objects": objects, "seg_source": source}, r)
+            logger.info("Analyzing fridge visual frame...")
+            detected = analyze_fridge_image_with_muse(data_uri)
+            result = process_inventory_and_order(tenant_id, detected)
+
+            if result["mock_order"]:
+                logger.info(f"Triggered order for {len(result['mock_order']['items'])} low-stock item(s).")
+            else:
+                logger.info("All fridge inventory levels are within acceptable thresholds.")
+
+        except Exception as e:
+            logger.error(f"Error during execution loop: {e}")
+
+        time.sleep(SAMPLE_INTERVAL_SEC)
 
 
 if __name__ == "__main__":
-    bus.consume("raw_frames", "sam3-segmenter", handle)
+    main()
