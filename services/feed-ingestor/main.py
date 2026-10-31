@@ -17,6 +17,7 @@ os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stime
 
 import cv2  # noqa: E402
 import httpx  # noqa: E402
+import redis  # noqa: E402
 
 from drishti import bus  # noqa: E402
 from drishti.config import settings  # noqa: E402
@@ -27,6 +28,8 @@ log = get_logger("feed-ingestor")
 TOKEN = os.environ.get("ADMIN_TOKEN", "")
 _pos_ms: dict[str, float] = {}
 _warned: set[str] = set()
+TRIGGER_BLOCK_SEC = 5
+TRIGGER_SOCKET_TIMEOUT_SEC = TRIGGER_BLOCK_SEC + 5
 
 
 def parse_feeds(spec: str) -> list[dict]:
@@ -149,10 +152,15 @@ def handle_trigger(raw: str, env_feeds: list[dict]) -> bool:
 
 
 def trigger_loop(env_feeds: list[dict]) -> None:
-    r = bus.redis_client()
+    r = redis.Redis.from_url(
+        settings.redis_uri,
+        decode_responses=True,
+        health_check_interval=30,
+        socket_timeout=TRIGGER_SOCKET_TIMEOUT_SEC,
+    )
     while not bus.stopping():
         try:
-            item = r.blpop("trigger:feed", timeout=5)
+            item = r.blpop("trigger:feed", timeout=TRIGGER_BLOCK_SEC)
             if item:
                 handle_trigger(item[1], env_feeds)
         except Exception:  # noqa: BLE001
