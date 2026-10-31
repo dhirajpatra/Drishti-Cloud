@@ -72,7 +72,7 @@ services:
       POSTGRES_USER: drishti
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-drishti123}
     ports: ["${BIND_ADDR:-127.0.0.1}:5432:5432"]
-    volumes: ["pg_data:/var/lib/postgresql/data"]
+    volumes: ["pg_data:/var/lib/postgresql/data", "./db/init:/docker-entrypoint-initdb.d"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U drishti -d drishti"]
       interval: 5s
@@ -151,6 +151,26 @@ services:
     <<: *agent
     build: { <<: *py-build, args: { SERVICE: action-agent } }
     healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "action-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
+
+  fridge-inventory-agent:
+    <<: *agent
+    build: { <<: *py-build, args: { SERVICE: fridge-inventory-agent } }
+    healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "fridge-inventory-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
+
+  grocery-price-agent:
+    <<: *agent
+    build: { <<: *py-build, args: { SERVICE: grocery-price-agent } }
+    healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "grocery-price-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
+
+  icu-medicine-agent:
+    <<: *agent
+    build: { <<: *py-build, args: { SERVICE: icu-medicine-agent } }
+    healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "icu-medicine-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
+
+  whatsapp-connector:
+    <<: *agent
+    build: { <<: *py-build, args: { SERVICE: whatsapp-connector } }
+    healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "whatsapp-connector"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
 
   # ---- demo edge (profile `sim`; .env.example enables it via COMPOSE_PROFILES) --------------------------
   pi-edge-simulator:

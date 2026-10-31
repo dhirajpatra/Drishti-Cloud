@@ -85,6 +85,22 @@ def test_each_camera_is_sampled_at_its_own_interval():
     assert fi.due_feeds(feeds, 1032.0) == []
 
 
+def test_trigger_listener_socket_timeout_exceeds_blpop_timeout(monkeypatch):
+    created = {}
+
+    def fake_from_url(url, **kwargs):
+        created.update(url=url, **kwargs)
+        return object()
+
+    monkeypatch.setattr(fi.redis.Redis, "from_url", fake_from_url)
+    monkeypatch.setattr(fi.bus, "stopping", lambda: True)
+
+    fi.trigger_loop([])
+
+    assert created["socket_timeout"] > fi.TRIGGER_BLOCK_SEC
+    assert created["socket_timeout"] == fi.TRIGGER_SOCKET_TIMEOUT_SEC
+
+
 def test_burst_posts_the_newest_frame_as_main_and_earlier_ones_as_burst(monkeypatch):
     seq = iter([b"f0", b"f1", b"f2", b"f3"])
     monkeypatch.setattr(fi, "grab", lambda feed: next(seq))
