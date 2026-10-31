@@ -4,7 +4,7 @@ import { api, type Actuation, type EventRow } from "../api";
 import { clock, humanize, LEVEL_COLOR, relTime, useNow } from "../lib";
 import { Chip, Empty, ErrorLine, Panel, Pill } from "./ui";
 
-const DECISION_COLOR: Record<string, string> = { CRITICAL: LEVEL_COLOR.CRITICAL, ALERT: LEVEL_COLOR.ALERT, SUPPRESSED: "#a78bfa" };
+const DECISION_COLOR: Record<string, string> = { CRITICAL: LEVEL_COLOR.CRITICAL, ALERT: LEVEL_COLOR.ALERT, SUPPRESSED: "var(--accent2)" };
 
 // frame_id -> object URL, or "none" when the picture expired / was never kept. Survives the 5 s polling re-renders.
 const thumbCache = new Map<string, string>();
@@ -22,7 +22,7 @@ function EventThumb({ tenantId, e }: { tenantId: string; e: EventRow }) {
       .catch(() => { thumbCache.set(key, "none"); if (alive) setUrl("none"); });
     return () => { alive = false; };
   }, [key, tenantId, e.frame_id, worthTrying]);
-  if (!url) return <div className="w-16 h-12 rounded" style={{ background: worthTrying ? "#05080f" : "transparent" }} />;
+  if (!url) return <div className="w-16 h-12 rounded" style={{ background: worthTrying ? "var(--field)" : "transparent" }} />;
   if (url === "none") return <div className="w-16 h-12 grid place-items-center" style={{ color: "var(--muted)" }}><ImageOff size={14} /></div>;
   return <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="Event frame" className="w-16 h-12 object-cover rounded border" style={{ borderColor: "var(--line)" }} /></a>;
 }
@@ -49,7 +49,7 @@ export function EventTimeline({ tenantId, events, loading, error }: { tenantId: 
                   <td className="mono py-1.5 pr-3 whitespace-nowrap">{clock(e.created_at)}</td>
                   <td className="mono pr-3 whitespace-nowrap" style={{ color: "var(--muted)" }}>{e.camera_id}</td>
                   <td className="pr-3"><Pill color={LEVEL_COLOR[e.level]}>{e.level}</Pill></td>
-                  <td className="pr-3">{e.decision ? <Pill color={DECISION_COLOR[e.decision] ?? "#8ea3c2"}>{e.decision}</Pill> : <span style={{ color: "var(--muted)" }}>-</span>}</td>
+                  <td className="pr-3">{e.decision ? <Pill color={DECISION_COLOR[e.decision] ?? "var(--muted)"}>{e.decision}</Pill> : <span style={{ color: "var(--muted)" }}>-</span>}</td>
                   <td className="py-1.5">{e.reason || <span style={{ color: "var(--muted)" }}>-</span>}</td>
                 </tr>
               ))}
@@ -63,9 +63,9 @@ export function EventTimeline({ tenantId, events, loading, error }: { tenantId: 
 
 const STATUS_COLOR = (s: string): string => {
   const l = s.toLowerCase();
-  if (/(ok|sent|deliver|done|success|ack)/.test(l)) return "#34d399";
-  if (/(fail|error|reject)/.test(l)) return "#f87171";
-  return "#fbbf24";
+  if (/(ok|sent|deliver|done|success|ack)/.test(l)) return "var(--ok)";
+  if (/(fail|error|reject)/.test(l)) return "var(--bad)";
+  return "var(--warn)";
 };
 
 export function ActuationList({ items, loading, error }: { items: Actuation[] | undefined; loading: boolean; error: string | null }) {
@@ -77,7 +77,7 @@ export function ActuationList({ items, loading, error }: { items: Actuation[] | 
       {items && items.length === 0 && <Empty>Nothing sent yet.</Empty>}
       <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
         {items?.map((a) => (
-          <div key={a.id} className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--line)", background: "#05080f" }}>
+          <div key={a.id} className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--line)", background: "var(--field)" }}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm">{humanize(a.kind)}</span>
               <Pill color={STATUS_COLOR(a.status)}>{a.status}</Pill>

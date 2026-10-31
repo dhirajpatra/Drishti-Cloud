@@ -56,7 +56,7 @@ export function TestFrame({ tenantId, vertical }: { tenantId: string; vertical: 
           <button disabled={busy} className="mono text-[12px] px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50 ml-auto" style={btnPrimary}><Send size={13} />{busy ? "SENDING..." : "SEND FRAME"}</button>
         </div>
         <ErrorLine msg={err} />
-        {result && <pre className="mono text-[11px] rounded-lg p-3 overflow-x-auto" style={{ background: "#05080f", color: "#c7d7f5" }}>{result}</pre>}
+        {result && <pre className="mono text-[11px] rounded-lg p-3 overflow-x-auto" style={{ background: "var(--field)", color: "var(--ink2)" }}>{result}</pre>}
       </form>
     </Panel>
   );

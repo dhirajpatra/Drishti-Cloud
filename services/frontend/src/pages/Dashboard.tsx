@@ -80,9 +80,9 @@ export default function Dashboard() {
               <p className="mono text-[11px]" style={{ color: "var(--muted)" }}>{tenant.id}{tenant.location ? ` · ${tenant.location}` : ""}</p>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-              <Stat label="Alerts 24h" value={tenant.alerts_24h} color={tenant.alerts_24h > 0 ? "#f87171" : "var(--accent)"} />
+              <Stat label="Alerts 24h" value={tenant.alerts_24h} color={tenant.alerts_24h > 0 ? "var(--bad)" : "var(--accent)"} />
               <Stat label="Events 24h" value={tenant.events_24h} />
-              <Stat label="Vertical critical 24h" value={vstats.data?.critical_24h ?? "-"} color="#f87171"
+              <Stat label="Vertical critical 24h" value={vstats.data?.critical_24h ?? "-"} color="var(--bad)"
                 sub={vstats.data ? `${vstats.data.alerts_24h} alerts · ${vstats.data.events_24h} events · ${vstats.data.tenants} tenants` : undefined} />
               <Stat label="Vertical levels" value={vstats.data ? `${vstats.data.by_level.NORMAL}/${vstats.data.by_level.ALERT}/${vstats.data.by_level.CRITICAL}` : "-"} color={vColor} sub="normal / alert / critical" />
               <Stat label="LLM calls today" value={llmTotal ?? "-"} color="var(--accent2)" sub={llmSub} />

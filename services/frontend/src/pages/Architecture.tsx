@@ -5,10 +5,10 @@ import { Activity, Bell, Brain, Camera, Cloud, Copy, Check, Cpu, Database, Eye, 
 const badges = ["Multi-Agent","Multi-Tenant","Multi-Modal","Neo4j","Docker Compose","Meta Model API","SAM 3.1","Muse Spark · Wonder · Image"];
 
 const agents = [
-  { id:"perception", name:"Perception Agent", model:"SAM 3.1 · Meta Model API", color:"#22d3ee", icon:Eye, desc:"Segments every frame into objects, masks & tracks. Converts pixels → scene-graph entities.", io:"in: frame.jpg → out: {objects:[{label,mask,bbox,track_id}]}" },
-  { id:"memory", name:"Memory Agent", model:"Llama open-weights (local) + Neo4j", color:"#34d399", icon:Database, desc:"5-person face embeddings per home, habit graph, object permanence across occlusions.", io:"in: embedding → out: person_id, confidence, last_seen" },
-  { id:"spark", name:"Spark Guard Agent", model:"Muse Spark · Meta API", color:"#fbbf24", icon:Zap, desc:"Fast-path sentinel. Evaluates scene graph every 30s — fire / fall / intruder / child-near-stairs.", io:"in: scene_graph → out: {risk:0-1, alert_type} in <800ms" },
-  { id:"wonder", name:"Wonder Reasoning Agent", model:"Muse Wonder · Meta API", color:"#a78bfa", icon:Brain, desc:"Slow-path reasoner. Habit learning, chain-of-thought over Neo4j context + news. Explains WHY.", io:"in: graph_context + news → out: decision + rationale" },
+  { id:"perception", name:"Perception Agent", model:"SAM 3.1 · Meta Model API", color:"var(--accent)", icon:Eye, desc:"Segments every frame into objects, masks & tracks. Converts pixels → scene-graph entities.", io:"in: frame.jpg → out: {objects:[{label,mask,bbox,track_id}]}" },
+  { id:"memory", name:"Memory Agent", model:"Llama open-weights (local) + Neo4j", color:"var(--ok)", icon:Database, desc:"5-person face embeddings per home, habit graph, object permanence across occlusions.", io:"in: embedding → out: person_id, confidence, last_seen" },
+  { id:"spark", name:"Spark Guard Agent", model:"Muse Spark · Meta API", color:"var(--warn)", icon:Zap, desc:"Fast-path sentinel. Evaluates scene graph every 30s — fire / fall / intruder / child-near-stairs.", io:"in: scene_graph → out: {risk:0-1, alert_type} in <800ms" },
+  { id:"wonder", name:"Wonder Reasoning Agent", model:"Muse Wonder · Meta API", color:"var(--accent2)", icon:Brain, desc:"Slow-path reasoner. Habit learning, chain-of-thought over Neo4j context + news. Explains WHY.", io:"in: graph_context + news → out: decision + rationale" },
   { id:"image", name:"Image Alert Agent", model:"Muse Image · Meta API", color:"#f472b6", icon:Camera, desc:"Generates annotated visual proof — bbox overlay, caption, before/after diff for the alert card.", io:"in: frame + alert → out: annotated_image_url" },
   { id:"news", name:"News & Context Agent", model:"Wonder + Web Search", color:"#38bdf8", icon:Newspaper, desc:"Grounds decisions in the real world: power cuts, AQI, weather warnings, local incidents.", io:"in: location → out: NewsContext nodes in Neo4j" },
   { id:"action", name:"Action Agent", model:"Policy engine + Wonder veto", color:"#fb923c", icon:MessageSquare, desc:"Decides the actuation: speak on Pi, WhatsApp, ISD1820 hardware alarm, or stay silent.", io:"in: decision → out: MQTT actuation + push" },
@@ -170,7 +170,7 @@ OPTIONAL MATCH (e)-[:RELATED_TO_NEWS]->(n:NewsContext)
 RETURN p.name, e.kind, o.name, e.at, n.headline
 ORDER BY e.at DESC;`;
 
-function CodeBlock({title, code, accent="#22d3ee"}:{title:string;code:string;accent?:string}){
+function CodeBlock({title, code, accent="var(--accent)"}:{title:string;code:string;accent?:string}){
   const [copied,setCopied]=useState(false);
   const copy=(e:React.MouseEvent)=>{
     const ta=document.createElement("textarea"); ta.value=code; document.body.appendChild(ta); ta.select();
@@ -179,12 +179,12 @@ function CodeBlock({title, code, accent="#22d3ee"}:{title:string;code:string;acc
     e.preventDefault();
   };
   return (
-    <div className="rounded-xl overflow-hidden border" style={{borderColor:"var(--line)",background:"#05080f"}}>
+    <div className="rounded-xl overflow-hidden border" style={{borderColor:"var(--line)",background:"var(--field)"}}>
       <div className="flex items-center justify-between px-4 py-2 border-b" style={{borderColor:"var(--line)",background:"var(--surface2)"}}>
         <span className="mono text-[11px] tracking-widest" style={{color:accent}}>{title}</span>
         <button onClick={copy} className="mono text-[11px] flex items-center gap-1 px-2 py-1 rounded border hover:opacity-80" style={{borderColor:"var(--line)",color:"var(--muted)"}}>{copied?<Check size={12}/> : <Copy size={12}/>}{copied?"COPIED":"COPY"}</button>
       </div>
-      <pre className="mono text-[12px] leading-relaxed p-4 overflow-x-auto whitespace-pre" style={{color:"#c7d7f5"}}>{code}</pre>
+      <pre className="mono text-[12px] leading-relaxed p-4 overflow-x-auto whitespace-pre" style={{color:"var(--ink2)"}}>{code}</pre>
     </div>
   );
 }
@@ -194,9 +194,9 @@ function SectionHead({kicker,title,sub}:{kicker:string;title:string;sub:string})
 }
 
 const tenants=[
-  {id:"home-01",label:"Home 1 · Bengaluru",persons:5,events:1284,status:"● LIVE",color:"#34d399"},
-  {id:"home-02",label:"Home 2 · Pune",persons:4,events:862,status:"● LIVE",color:"#34d399"},
-  {id:"home-03",label:"Home 3 · Delhi",persons:5,events:1977,status:"◐ SYNCING",color:"#fbbf24"},
+  {id:"home-01",label:"Home 1 · Bengaluru",persons:5,events:1284,status:"● LIVE",color:"var(--ok)"},
+  {id:"home-02",label:"Home 2 · Pune",persons:4,events:862,status:"● LIVE",color:"var(--ok)"},
+  {id:"home-03",label:"Home 3 · Delhi",persons:5,events:1977,status:"◐ SYNCING",color:"var(--warn)"},
 ];
 
 export default function App(){
@@ -250,13 +250,13 @@ export default function App(){
     <div style={{background:"var(--bg)"}} className="min-h-screen">
     {/* HEADER */}
     <header data-safe-area-sticky-top style={{top:"var(--safe-area-inset-top)"}} className="sticky z-40 backdrop-blur border-b" >
-      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between" style={{background:"rgba(7,11,18,0.92)",borderColor:"var(--line)"}}>
-        <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-lg grid place-items-center font-bold" style={{background:"var(--accent)",color:"#04121a"}}><Eye size={20}/></div>
+      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between" style={{background:"var(--header)",borderColor:"var(--line)"}}>
+        <div className="flex items-center gap-3"><div className="w-9 h-9 rounded-lg grid place-items-center font-bold" style={{background:"var(--accent)",color:"var(--on-accent)"}}><Eye size={20}/></div>
         <div><p className="font-bold leading-none">DRISHTI CLOUD</p><p className="mono text-[10px] tracking-widest" style={{color:"var(--muted)"}}>HOME SENTINEL · META GLOBAL AI HACKATHON</p></div></div>
         <nav className="hidden md:flex gap-5 mono text-[11px] tracking-widest" style={{color:"var(--muted)"}}>
           <a href="#arch" className="hover:text-white">ARCHITECTURE</a><a href="#tenancy" className="hover:text-white">TENANCY</a><a href="#multimodal" className="hover:text-white">MULTI-MODAL</a><a href="#graph" className="hover:text-white">NEO4J</a><a href="#code" className="hover:text-white">CODE</a><a href="#deploy" className="hover:text-white">DEPLOY</a>
         </nav>
-        <span className="mono text-[10px] px-2 py-1 rounded-full border" style={{borderColor:"#14532d",color:"#4ade80",background:"#052e16"}}>SYSTEM DESIGN v2.1</span>
+        <span className="mono text-[10px] px-2 py-1 rounded-full border" style={{borderColor:"var(--ok)",color:"var(--ok)",background:"var(--ok-bg)"}}>SYSTEM DESIGN v2.1</span>
       </div>
     </header>
 
@@ -266,7 +266,7 @@ export default function App(){
         <p className="mono text-[11px] tracking-[0.3em]" style={{color:"var(--accent)"}}>EYE → GRAPH → REASON → ACT · IN UNDER 8 SECONDS</p>
         <h1 className="text-4xl md:text-6xl font-bold leading-[1.02] mt-3 max-w-4xl">Drishti Cloud —<br/><span style={{color:"var(--accent)"}}>Multi-Agent Superintelligence</span><br/>for every home.</h1>
         <p className="mt-4 max-w-2xl text-base" style={{color:"var(--muted)"}}>A multi-agent, multi-tenant, multi-modal sentinel cloud. Raspberry Pi 5 homes stream compressed scene graphs — seven specialised agents perceive, remember, reason and act, grounded in a Neo4j knowledge graph and live world context.</p>
-        <div className="flex flex-wrap gap-2 mt-6">{badges.map(b=><span key={b} className="mono text-[11px] px-3 py-1.5 rounded-full border" style={{borderColor:"var(--line)",background:"var(--surface)",color:"#c7d7f5"}}>{b}</span>)}</div>
+        <div className="flex flex-wrap gap-2 mt-6">{badges.map(b=><span key={b} className="mono text-[11px] px-3 py-1.5 rounded-full border" style={{borderColor:"var(--line)",background:"var(--surface)",color:"var(--ink2)"}}>{b}</span>)}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-8">
           {[["7","Specialised agents"],["30 s","Spark Guard cadence"],["<8 s","Edge → action latency"],["1,000s","Homes per cluster"]].map(([v,l])=>(<div key={l} className="rounded-xl p-4 border" style={{background:"var(--surface)",borderColor:"var(--line)"}}><p className="text-3xl font-bold" style={{color:"var(--accent)"}}>{v}</p><p className="mono text-[11px] tracking-widest mt-1" style={{color:"var(--muted)"}}>{l}</p></div>))}
         </div>
@@ -276,29 +276,29 @@ export default function App(){
       <section id="arch" className="py-8">
         <SectionHead kicker="01 · SYSTEM TOPOLOGY" title="Architecture — Edge to Cloud" sub="Each home is an autonomous edge tenant. Raw video never leaves the house — only a compressed scene-graph JSON crosses MQTT."/>
         <div className="grid lg:grid-cols-3 gap-4">
-          <div className="rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"#164e63"}}>
+          <div className="rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--accent)"}}>
             <p className="mono text-[11px] tracking-widest flex items-center gap-2" style={{color:"var(--accent)"}}><Home size={14}/> EDGE LAYER · PER TENANT</p>
             <div className="mt-4 space-y-2">
               {tenants.map(t=>(<button key={t.id} onClick={()=>setTenant(t)} className="w-full text-left rounded-lg px-3 py-2 border flex justify-between items-center" style={{background:tenant.id===t.id?"var(--surface2)":"transparent",borderColor:tenant.id===t.id?"var(--accent)":"var(--line)"}}><span className="text-sm font-semibold">{t.label}</span><span className="mono text-[10px]" style={{color:t.color}}>{t.status}</span></button>))}
             </div>
             <p className="mono text-[11px] mt-4 mb-2" style={{color:"var(--muted)"}}>RASPBERRY PI 5 · SENSOR RIG</p>
             <div className="grid grid-cols-2 gap-2 text-[12px]">
-              {[["Camera","Pi Cam 3 · 1080p"],[ "HC-SR04 ×2","Ultrasonic distance"],["PIR","Motion"],["IR","Proximity gesture"],["DHT11","Temp / humidity"],["OLED","Status display"],["USB Mic","Audio in"],["2\" Speaker + PAM8403","Voice out"],["ISD1820","Hardware voice alarm"]].map(([a,b])=>(<div key={a} className="rounded-lg p-2 border" style={{borderColor:"var(--line)",background:"#05080f"}}><p className="font-semibold">{a}</p><p style={{color:"var(--muted)"}}>{b}</p></div>))}
+              {[["Camera","Pi Cam 3 · 1080p"],[ "HC-SR04 ×2","Ultrasonic distance"],["PIR","Motion"],["IR","Proximity gesture"],["DHT11","Temp / humidity"],["OLED","Status display"],["USB Mic","Audio in"],["2\" Speaker + PAM8403","Voice out"],["ISD1820","Hardware voice alarm"]].map(([a,b])=>(<div key={a} className="rounded-lg p-2 border" style={{borderColor:"var(--line)",background:"var(--field)"}}><p className="font-semibold">{a}</p><p style={{color:"var(--muted)"}}>{b}</p></div>))}
             </div>
             <div className="mt-4 rounded-lg p-3 border border-dashed" style={{borderColor:"var(--accent)"}}>
               <p className="mono text-[11px]" style={{color:"var(--accent)"}}>EDGE AGENT (ON PI)</p>
-              <p className="text-[12px] mt-1" style={{color:"var(--muted)"}}>Perception compression → motion-gated frames, downscaled crops, sensor fusion → <span className="mono" style={{color:"#c7d7f5"}}>scene-graph JSON via MQTT</span> (QoS 1, TLS, tenant topic <span className="mono">home/{tenant.id}/scene</span>)</p>
+              <p className="text-[12px] mt-1" style={{color:"var(--muted)"}}>Perception compression → motion-gated frames, downscaled crops, sensor fusion → <span className="mono" style={{color:"var(--ink2)"}}>scene-graph JSON via MQTT</span> (QoS 1, TLS, tenant topic <span className="mono">home/{tenant.id}/scene</span>)</p>
             </div>
           </div>
 
           <div className="lg:col-span-2 rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--line)"}}>
             <p className="mono text-[11px] tracking-widest flex items-center gap-2" style={{color:"var(--accent2)"}}><Cloud size={14}/> CLOUD LAYER · DOCKER COMPOSE</p>
-            <div className="rounded-lg p-3 mt-4 flex items-center justify-between border" style={{borderColor:"var(--line)",background:"#05080f"}}>
+            <div className="rounded-lg p-3 mt-4 flex items-center justify-between border" style={{borderColor:"var(--line)",background:"var(--field)"}}>
               <div><p className="font-bold text-sm">API Gateway · FastAPI</p><p className="mono text-[11px]" style={{color:"var(--muted)"}}>Multi-tenant auth — tenant_id from JWT claim on every request</p></div><Shield size={18} style={{color:"var(--accent)"}}/>
             </div>
             <div className="grid md:grid-cols-2 gap-2 mt-3">
               {agents.map(a=>{const Icon=a.icon; const active=activeAgent.id===a.id; return (
-                <button key={a.id} onClick={()=>setActiveAgent(a)} className="text-left rounded-xl p-3 border transition" style={{borderColor:active?a.color:"var(--line)",background:active?"var(--surface2)":"#05080f"}}>
+                <button key={a.id} onClick={()=>setActiveAgent(a)} className="text-left rounded-xl p-3 border transition" style={{borderColor:active?a.color:"var(--line)",background:active?"var(--surface2)":"var(--field)"}}>
                   <p className="flex items-center gap-2 font-semibold text-sm"><Icon size={15} style={{color:a.color}}/>{a.name}</p>
                   <p className="mono text-[10px] mt-1" style={{color:a.color}}>{a.model}</p>
                 </button>)})}
@@ -306,10 +306,10 @@ export default function App(){
             <div className="rounded-xl p-4 mt-3 border" style={{borderColor:activeAgent.color,background:"var(--surface2)"}}>
               <p className="font-bold flex items-center gap-2">{activeAgent.name}<span className="mono text-[10px] px-2 py-0.5 rounded-full border" style={{borderColor:activeAgent.color,color:activeAgent.color}}>SELECTED</span></p>
               <p className="text-sm mt-2" style={{color:"var(--muted)"}}>{activeAgent.desc}</p>
-              <p className="mono text-[11px] mt-3 px-2 py-1 rounded" style={{background:"#05080f",color:"#c7d7f5"}}>{activeAgent.io}</p>
+              <p className="mono text-[11px] mt-3 px-2 py-1 rounded" style={{background:"var(--field)",color:"var(--ink2)"}}>{activeAgent.io}</p>
             </div>
             <div className="grid grid-cols-3 gap-2 mt-3 text-center">
-              {[["Neo4j","Knowledge graph · habits, objects, persons, events",Database,"#34d399"],["Redis","Queue for multi-agent messages · pub/sub + streams",Radio,"#f87171"],["Postgres","Tenant data · timeline · audit log",Server,"#60a5fa"]].map(([n,d,Icon,c]:any)=>(<div key={n} className="rounded-xl p-3 border" style={{borderColor:"var(--line)",background:"#05080f"}}><Icon size={18} style={{color:c,margin:"0 auto"}}/><p className="font-bold text-sm mt-1">{n}</p><p className="text-[11px]" style={{color:"var(--muted)"}}>{d}</p></div>))}
+              {[["Neo4j","Knowledge graph · habits, objects, persons, events",Database,"var(--ok)"],["Redis","Queue for multi-agent messages · pub/sub + streams",Radio,"var(--bad)"],["Postgres","Tenant data · timeline · audit log",Server,"#60a5fa"]].map(([n,d,Icon,c]:any)=>(<div key={n} className="rounded-xl p-3 border" style={{borderColor:"var(--line)",background:"var(--field)"}}><Icon size={18} style={{color:c,margin:"0 auto"}}/><p className="font-bold text-sm mt-1">{n}</p><p className="text-[11px]" style={{color:"var(--muted)"}}>{d}</p></div>))}
             </div>
           </div>
         </div>
@@ -317,7 +317,7 @@ export default function App(){
         {/* live sim */}
         <div className="rounded-2xl border p-5 mt-4" style={{background:"var(--surface)",borderColor:"var(--line)"}}>
           <div className="flex flex-wrap items-center justify-between gap-3"><p className="mono text-[11px] tracking-widest" style={{color:"var(--accent)"}}>LIVE TRACE · {tenant.label.toUpperCase()} · INTRUDER SCENARIO</p>
-          <div className="flex gap-2"><button onClick={()=>setSimStep(s=>Math.max(0,s-1))} className="mono text-[11px] px-3 py-1.5 rounded border" style={{borderColor:"var(--line)"}}>← PREV</button><button onClick={()=>setSimStep(s=>Math.min(sim.length-1,s+1))} className="mono text-[11px] px-3 py-1.5 rounded" style={{background:"var(--accent)",color:"#04121a",fontWeight:700}}>STEP →</button><button onClick={()=>setSimStep(0)} className="mono text-[11px] px-3 py-1.5 rounded border" style={{borderColor:"var(--line)"}}>RESET</button></div></div>
+          <div className="flex gap-2"><button onClick={()=>setSimStep(s=>Math.max(0,s-1))} className="mono text-[11px] px-3 py-1.5 rounded border" style={{borderColor:"var(--line)"}}>← PREV</button><button onClick={()=>setSimStep(s=>Math.min(sim.length-1,s+1))} className="mono text-[11px] px-3 py-1.5 rounded" style={{background:"var(--accent)",color:"var(--on-accent)",fontWeight:700}}>STEP →</button><button onClick={()=>setSimStep(0)} className="mono text-[11px] px-3 py-1.5 rounded border" style={{borderColor:"var(--line)"}}>RESET</button></div></div>
           <div className="mt-4 space-y-2">{sim.map((s,i)=>(<div key={i} className="flex gap-3 items-start rounded-lg px-3 py-2 border" style={{opacity:i<=simStep?1:0.35,borderColor:i===simStep?"var(--accent)":"var(--line)",background:i===simStep?"var(--surface2)":"transparent"}}><span className="mono text-[11px]" style={{color:"var(--accent)"}}>{s.t}</span><span className="mono text-[10px] px-2 py-0.5 rounded-full border shrink-0" style={{borderColor:"var(--line)",color:"var(--muted)"}}>{s.agent}</span><span className="text-sm">{s.label}</span>{i===simStep&&<ChevronRight size={14} className="ml-auto shrink-0" style={{color:"var(--accent)"}}/>}</div>))}</div>
         </div>
       </section>
@@ -332,7 +332,7 @@ export default function App(){
             [Shield,"Row + topic level isolation","Postgres RLS on tenant_id, MQTT ACLs per device certificate, JWT tenant claim verified at the FastAPI gateway. Each home sees only its timeline, its 5 persons, its habits."],
           ].map(([Icon,t,d]:any)=>(<div key={t} className="rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--line)"}}><Icon size={20} style={{color:"var(--accent)"}}/><h3 className="font-bold mt-3">{t}</h3><p className="text-sm mt-2" style={{color:"var(--muted)"}}>{d}</p></div>))}
         </div>
-        <div className="rounded-xl border p-4 mt-4 mono text-[12px] overflow-x-auto" style={{background:"#05080f",borderColor:"var(--line)",color:"#c7d7f5"}}>MQTT  home/home-01/scene ─┐<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;home/home-02/scene ─┼→ Redis Streams → [Perception ×3] → [Spark ×N] → [Wonder ×2] → Action → MQTT home/{"{id}"}/actuate<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;home/home-03/scene ─┘&nbsp;&nbsp;&nbsp;&nbsp;↑ per-tenant consumer groups · horizontal scale by adding replicas</div>
+        <div className="rounded-xl border p-4 mt-4 mono text-[12px] overflow-x-auto" style={{background:"var(--field)",borderColor:"var(--line)",color:"var(--ink2)"}}>MQTT  home/home-01/scene ─┐<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;home/home-02/scene ─┼→ Redis Streams → [Perception ×3] → [Spark ×N] → [Wonder ×2] → Action → MQTT home/{"{id}"}/actuate<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;home/home-03/scene ─┘&nbsp;&nbsp;&nbsp;&nbsp;↑ per-tenant consumer groups · horizontal scale by adding replicas</div>
       </section>
 
       {/* 4 MULTIMODAL */}
@@ -341,7 +341,7 @@ export default function App(){
         <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
           {[[Camera,"Video","SAM 3.1 segmentation","objects, masks, tracks"],[Mic,"Audio","Whisper STT","speech, glass-break, cry"],[Waves,"Ultrasound","HC-SR04 ×2","distance cm, approach vector"],[Activity,"Gesture","IR proximity","wave / reach events"],[Radio,"Motion","PIR","presence, zone triggers"],[Thermometer,"Climate","DHT11","temp °C, humidity %"]].map(([Icon,n,m,o]:any)=>(<div key={n} className="rounded-2xl border p-4 text-center" style={{background:"var(--surface)",borderColor:"var(--line)"}}><Icon size={22} style={{color:"var(--accent)",margin:"0 auto"}}/><p className="font-bold mt-2">{n}</p><p className="mono text-[10px]" style={{color:"var(--accent)"}}>{m}</p><p className="text-[11px] mt-1" style={{color:"var(--muted)"}}>{o}</p></div>))}
         </div>
-        <div className="mt-4"><CodeBlock title="scene_graph.json — fused output (one message, every 30s or on event)" accent="#a78bfa" code={`{
+        <div className="mt-4"><CodeBlock title="scene_graph.json — fused output (one message, every 30s or on event)" accent="var(--accent2)" code={`{
   "tenant_id": "home-01", "ts": "2026-05-11T02:14:03+05:30",
   "vision":  { "objects": [{"label":"person","track":7,"bbox":[.12,.3,.3,.8]},
                             {"label":"stove","state":"on"}],
@@ -377,13 +377,13 @@ CREATE CONSTRAINT person_key IF NOT EXISTS
       {/* 6 COMPOSE */}
       <section className="py-8">
         <SectionHead kicker="05 · INFRASTRUCTURE" title="Docker Compose — Whole Cloud, One Command" sub="Eleven services. Secrets via environment — LLAMA_API_KEY powers every Meta Model API call."/>
-        <CodeBlock title="docker-compose.yml" code={compose} accent="#fbbf24"/>
+        <CodeBlock title="docker-compose.yml" code={compose} accent="var(--warn)"/>
       </section>
 
       {/* 7 CODE */}
       <section id="code" className="py-8">
         <SectionHead kicker="06 · AGENT CODE" title="Agent Implementations" sub="Meta models use the Responses API at api.meta.ai/v1/responses."/>
-        <div className="flex flex-wrap gap-2 mb-4">{(Object.keys(codeTabs) as (keyof typeof codeTabs)[]).map(k=>(<button key={k} onClick={()=>setActiveCode(k)} className="mono text-[11px] px-3 py-2 rounded-lg border" style={{background:activeCode===k?"var(--accent)":"var(--surface)",color:activeCode===k?"#04121a":"var(--muted)",borderColor:"var(--line)",fontWeight:activeCode===k?700:400}}>{codeTabs[k].lang}</button>))}</div>
+        <div className="flex flex-wrap gap-2 mb-4">{(Object.keys(codeTabs) as (keyof typeof codeTabs)[]).map(k=>(<button key={k} onClick={()=>setActiveCode(k)} className="mono text-[11px] px-3 py-2 rounded-lg border" style={{background:activeCode===k?"var(--accent)":"var(--surface)",color:activeCode===k?"var(--on-accent)":"var(--muted)",borderColor:"var(--line)",fontWeight:activeCode===k?700:400}}>{codeTabs[k].lang}</button>))}</div>
         <CodeBlock title={codeTabs[activeCode].lang} code={codeTabs[activeCode].code}/>
       </section>
 
@@ -391,7 +391,7 @@ CREATE CONSTRAINT person_key IF NOT EXISTS
       <section className="py-8">
         <SectionHead kicker="07 · HACKATHON FIT" title="How It Meets the Brief" sub="Built entirely on the Meta ecosystem — frontier Muse models for reasoning, SAM for perception, open weights where privacy demands it."/>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {[["Muse Spark","Fast 30s guard loop via Meta Model API — sub-second safety verdicts.","#fbbf24"],["Muse Wonder","Deep chain-of-thought, habit learning, news-grounded decisions.","#a78bfa"],["Muse Image","Annotated visual proof for every alert.","#f472b6"],["SAM 3.1","Promptable segmentation turns frames into scene graphs.","#22d3ee"],["Open weights · Baseten / Modal","Llama face embeddings run locally / on-demand GPU — biometric data stays private.","#34d399"],["Muse Code","Agents scaffolded & iterated with Muse Code.","#60a5fa"],["Multi-agent","7 specialised agents on Redis queues, not one monolith prompt.","#fb923c"],["Multi-tenant","tenant_id isolation in Neo4j, Redis, Postgres & MQTT.","#38bdf8"],["Cloud-native","Docker Compose today, Modal/Baseten scale tomorrow.","#a3e635"]].map(([t,d,c])=>(<div key={t} className="rounded-2xl border p-4" style={{background:"var(--surface)",borderColor:"var(--line)"}}><p className="font-bold" style={{color:c}}>{t}</p><p className="text-sm mt-1" style={{color:"var(--muted)"}}>{d}</p></div>))}
+          {[["Muse Spark","Fast 30s guard loop via Meta Model API — sub-second safety verdicts.","var(--warn)"],["Muse Wonder","Deep chain-of-thought, habit learning, news-grounded decisions.","var(--accent2)"],["Muse Image","Annotated visual proof for every alert.","#f472b6"],["SAM 3.1","Promptable segmentation turns frames into scene graphs.","var(--accent)"],["Open weights · Baseten / Modal","Llama face embeddings run locally / on-demand GPU — biometric data stays private.","var(--ok)"],["Muse Code","Agents scaffolded & iterated with Muse Code.","#60a5fa"],["Multi-agent","7 specialised agents on Redis queues, not one monolith prompt.","#fb923c"],["Multi-tenant","tenant_id isolation in Neo4j, Redis, Postgres & MQTT.","#38bdf8"],["Cloud-native","Docker Compose today, Modal/Baseten scale tomorrow.","#a3e635"]].map(([t,d,c])=>(<div key={t} className="rounded-2xl border p-4" style={{background:"var(--surface)",borderColor:"var(--line)"}}><p className="font-bold" style={{color:c}}>{t}</p><p className="text-sm mt-1" style={{color:"var(--muted)"}}>{d}</p></div>))}
         </div>
       </section>
 
@@ -399,7 +399,7 @@ CREATE CONSTRAINT person_key IF NOT EXISTS
       <section id="deploy" className="py-10">
         <SectionHead kicker="08 · DEPLOYMENT" title="Ship It" sub="From laptop demo to planet-scale sentinel in three moves."/>
         <div className="grid lg:grid-cols-2 gap-4">
-          <CodeBlock title="terminal" accent="#34d399" code={`git clone https://github.com/drishti/drishti-cloud && cd drishti-cloud
+          <CodeBlock title="terminal" accent="var(--ok)" code={`git clone https://github.com/drishti/drishti-cloud && cd drishti-cloud
 cp .env.example .env        # set LLAMA_API_KEY, NEO4J_PASSWORD
 docker compose up -d --build
 docker compose ps           # 11 services healthy
@@ -411,7 +411,7 @@ open http://localhost:7474  # Neo4j Browser — watch the graph grow`}/>
             {[["1 · Compose (demo / pilot)","All agents + Neo4j + Redis + Postgres on one VM. pi-edge-simulator replays telemetry so judges see alerts without hardware."],["2 · Scale the hot agents","Perception & Spark Guard scale horizontally (stateless, Redis-fed). Wonder scales on demand — it only wakes on candidates."],["3 · Modal / Baseten (production)","GPU agents (SAM post-processing, Llama embeddings) move to Modal/Baseten autoscaling; Neo4j Aura + managed Redis/Postgres. Edge stays on Pi 5 — cloud cost per home stays in paise, not rupees."]].map(([t,d])=>(<div key={t} className="rounded-2xl border p-4" style={{background:"var(--surface)",borderColor:"var(--line)"}}><p className="font-bold">{t}</p><p className="text-sm mt-1" style={{color:"var(--muted)"}}>{d}</p></div>))}
           </div>
         </div>
-        <div className="rounded-2xl border p-6 mt-6 text-center" style={{background:"linear-gradient(135deg,#0e2233,#1a1033)",borderColor:"var(--line)"}}>
+        <div className="rounded-2xl border p-6 mt-6 text-center" style={{background:"linear-gradient(135deg,var(--surface2),var(--surface))",borderColor:"var(--line)"}}>
           <Sparkles style={{color:"var(--accent)",margin:"0 auto"}}/>
           <p className="text-xl font-bold mt-2">Drishti sees. The graph remembers. Wonder reasons. The home acts.</p>
           <p className="mono text-[11px] tracking-widest mt-2" style={{color:"var(--muted)"}}>DRISHTI · HOME SENTINEL CLOUD · META GLOBAL AI HACKATHON</p>
@@ -422,12 +422,12 @@ open http://localhost:7474  # Neo4j Browser — watch the graph grow`}/>
         <SectionHead kicker="09 · OPERATOR WORKSPACE" title="Tenant Notes — Saved in the Cloud" sub="Durable operator notes per tenant, stored via the trusted records API. Add a deployment note and it persists across sessions."/>
         <div className="rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--line)"}}>
           <div className="flex flex-col sm:flex-row gap-2">
-            <input value={noteText} onChange={e=>setNoteText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") addNote();}} placeholder={`Note for ${tenant.label} — e.g. enrol Asha, tune Spark threshold…`} className="flex-1 rounded-lg px-3 py-2.5 text-sm border outline-none" style={{background:"#05080f",borderColor:"var(--line)",color:"var(--ink)"}} />
-            <button onClick={addNote} disabled={noteBusy} className="mono text-[12px] px-4 py-2.5 rounded-lg font-bold disabled:opacity-50" style={{background:"var(--accent)",color:"#04121a"}}>{noteBusy?"SAVING…":"＋ SAVE NOTE"}</button>
+            <input value={noteText} onChange={e=>setNoteText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") addNote();}} placeholder={`Note for ${tenant.label} — e.g. enrol Asha, tune Spark threshold…`} className="flex-1 rounded-lg px-3 py-2.5 text-sm border outline-none" style={{background:"var(--field)",borderColor:"var(--line)",color:"var(--ink)"}} />
+            <button onClick={addNote} disabled={noteBusy} className="mono text-[12px] px-4 py-2.5 rounded-lg font-bold disabled:opacity-50" style={{background:"var(--accent)",color:"var(--on-accent)"}}>{noteBusy?"SAVING…":"＋ SAVE NOTE"}</button>
           </div>
           {noteMsg && <p className="mono text-[11px] mt-3" style={{color:"var(--muted)"}}>{noteMsg}</p>}
           <div className="mt-4 space-y-2">
-            {notes.length===0 ? <p className="text-sm" style={{color:"var(--muted)"}}>No saved notes yet for this workspace. Add one above — it will reload here on your next visit.</p> : notes.map((n:any)=>(<div key={n.id} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2 border" style={{borderColor:"var(--line)",background:"#05080f"}}><div><p className="text-sm">{n.value?.text}</p><p className="mono text-[10px] mt-1" style={{color:"var(--muted)"}}>{n.value?.tenant_id} · {n.created_at ? new Date(n.created_at).toLocaleString() : ""}</p></div><button onClick={()=>deleteNote(n.id)} className="mono text-[11px] px-2 py-1 rounded border shrink-0" style={{borderColor:"var(--line)",color:"var(--muted)"}}>DELETE</button></div>))}
+            {notes.length===0 ? <p className="text-sm" style={{color:"var(--muted)"}}>No saved notes yet for this workspace. Add one above — it will reload here on your next visit.</p> : notes.map((n:any)=>(<div key={n.id} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2 border" style={{borderColor:"var(--line)",background:"var(--field)"}}><div><p className="text-sm">{n.value?.text}</p><p className="mono text-[10px] mt-1" style={{color:"var(--muted)"}}>{n.value?.tenant_id} · {n.created_at ? new Date(n.created_at).toLocaleString() : ""}</p></div><button onClick={()=>deleteNote(n.id)} className="mono text-[11px] px-2 py-1 rounded border shrink-0" style={{borderColor:"var(--line)",color:"var(--muted)"}}>DELETE</button></div>))}
           </div>
         </div>
       </section>

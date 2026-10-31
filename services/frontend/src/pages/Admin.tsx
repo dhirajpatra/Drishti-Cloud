@@ -7,7 +7,7 @@ import { Chip, Empty, ErrorLine, Panel, Pill, btnGhost, btnPrimary, inputCls, in
 const msg = (x: unknown) => (x instanceof Error ? x.message : String(x));
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-const LEVEL_COLOR: Record<string, string> = { ALERT: "#fbbf24", CRITICAL: "#f87171" };
+const LEVEL_COLOR: Record<string, string> = { ALERT: "var(--warn)", CRITICAL: "var(--bad)" };
 
 function Field({ label, hint, changed, children }: { label: string; hint?: string; changed?: boolean; children: ReactNode }) {
   return (
@@ -24,7 +24,7 @@ function Field({ label, hint, changed, children }: { label: string; hint?: strin
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
-      className="mono text-[10px] px-2 py-1 rounded-full border shrink-0" style={{ borderColor: on ? "#4ade80" : "var(--line)", color: on ? "#4ade80" : "var(--muted)" }}>
+      className="mono text-[10px] px-2 py-1 rounded-full border shrink-0" style={{ borderColor: on ? "var(--ok)" : "var(--line)", color: on ? "var(--ok)" : "var(--muted)" }}>
       {on ? "ON" : "OFF"}
     </button>
   );
@@ -89,7 +89,7 @@ function Connection({ tenant, camera, reload }: { tenant: string; camera: string
   if (!cur && !err) return <Empty>Loading...</Empty>;
   return (
     <form onSubmit={save} className="space-y-3">
-      {cur?.source === "env" && <p className="text-[12px]" style={{ color: "#fbbf24" }}>This camera comes from <span className="mono">RTSP_FEEDS</span> in .env. Saving here moves it to the database (its current password is kept), and the saved address wins from then on.</p>}
+      {cur?.source === "env" && <p className="text-[12px]" style={{ color: "var(--warn)" }}>This camera comes from <span className="mono">RTSP_FEEDS</span> in .env. Saving here moves it to the database (its current password is kept), and the saved address wins from then on.</p>}
       {cur?.source === "edge" && <p className="text-[12px]" style={{ color: "var(--muted)" }}>No connection saved. Frames for this camera currently arrive from an edge device or manual upload. Fill this in to have Drishti pull from a camera.</p>}
       <div className="grid sm:grid-cols-[8rem_1fr_7rem] gap-2">
         <Field label="Protocol"><select className={inputCls} style={inputStyle} value={f.scheme} onChange={(e) => setF({ ...f, scheme: e.target.value })}>
@@ -113,10 +113,10 @@ function Connection({ tenant, camera, reload }: { tenant: string; camera: string
         {cur?.source === "database" && <button type="button" disabled={busy} onClick={remove} className="mono text-[11px] px-3 py-2 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={btnGhost}><Trash2 size={12} />REMOVE SAVED</button>}
       </div>
       <ErrorLine msg={err} />
-      {ok && <p className="mono text-[11px]" style={{ color: "#4ade80" }}>✓ {ok}</p>}
+      {ok && <p className="mono text-[11px]" style={{ color: "var(--ok)" }}>✓ {ok}</p>}
       {test && (test.ok
-        ? <div><p className="mono text-[11px] mb-1" style={{ color: "#4ade80" }}>✓ Connected, picture received ({Math.round(test.bytes / 1024)} KB)</p>{test.preview && <img src={test.preview} alt="Camera preview" className="rounded-lg border max-h-56" style={{ borderColor: "var(--line)" }} />}</div>
-        : <p className="mono text-[11px]" style={{ color: "#f87171" }}>✗ Could not get a picture: {test.error}</p>)}
+        ? <div><p className="mono text-[11px] mb-1" style={{ color: "var(--ok)" }}>✓ Connected, picture received ({Math.round(test.bytes / 1024)} KB)</p>{test.preview && <img src={test.preview} alt="Camera preview" className="rounded-lg border max-h-56" style={{ borderColor: "var(--line)" }} />}</div>
+        : <p className="mono text-[11px]" style={{ color: "var(--bad)" }}>✗ Could not get a picture: {test.error}</p>)}
     </form>
   );
 }
@@ -281,7 +281,7 @@ function SiteDetails({ t, sop, reload }: { t: AdminTenant; sop: string; reload: 
       <Field label={`Safety procedure (SOP) - shared by every ${t.vertical_label} site`} hint="The AI cites this when explaining an alert.">
         <textarea className={inputCls + " h-40 mono text-[12px]"} style={inputStyle} value={text} onChange={(e) => setText(e.target.value)} /></Field>
       <button className="mono text-[11px] px-3 py-2 rounded-lg border" style={btnGhost} onClick={() => go(async () => (await api.saveAdminSop(t.id, text)).note)}>SAVE SOP</button>
-      <ErrorLine msg={err} />{ok && <p className="mono text-[11px]" style={{ color: "#4ade80" }}>✓ {ok}</p>}
+      <ErrorLine msg={err} />{ok && <p className="mono text-[11px]" style={{ color: "var(--ok)" }}>✓ {ok}</p>}
     </div>
   );
 }
@@ -311,7 +311,7 @@ function Editor({ t, camera, ov, reload }: { t: AdminTenant; camera: string; ov:
   const editing = tab !== "connection" && tab !== "site";
   return (
     <Panel kicker={camera ? "CAMERA SETTINGS" : "SITE SETTINGS"} title={camera ? `${t.name} · ${camera}` : t.name}
-      right={customised ? <Pill color="var(--accent)">CUSTOMISED</Pill> : <Pill color="#8ea3c2">DEFAULTS</Pill>}>
+      right={customised ? <Pill color="var(--accent)">CUSTOMISED</Pill> : <Pill color="var(--muted)">DEFAULTS</Pill>}>
       {camera && <p className="text-[11px] mb-3" style={{ color: "var(--muted)" }}>Settings you change here apply to this camera only; everything else is inherited from the site.</p>}
       <div className="flex gap-1 flex-wrap mb-4 mono text-[11px] tracking-wide">
         {tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className="px-3 py-1.5 rounded-lg border" style={{ borderColor: tab === id ? "var(--accent)" : "var(--line)", color: tab === id ? "var(--accent)" : "var(--muted)" }}>{label}</button>)}
@@ -329,10 +329,10 @@ function Editor({ t, camera, ov, reload }: { t: AdminTenant; camera: string; ov:
             <button disabled={!dirty || busy} onClick={save} className="mono text-[11px] px-3 py-2 rounded-lg flex items-center gap-1.5 disabled:opacity-40" style={btnPrimary}><Save size={12} />SAVE CHANGES</button>
             <button disabled={!dirty || busy} onClick={() => data && setDraft(clone(data.effective))} className="mono text-[11px] px-3 py-2 rounded-lg border disabled:opacity-40" style={btnGhost}>DISCARD</button>
             <button disabled={!customised || busy} onClick={reset} className="mono text-[11px] px-3 py-2 rounded-lg border flex items-center gap-1.5 disabled:opacity-40" style={btnGhost}><RotateCcw size={12} />{camera ? "INHERIT FROM SITE" : "RESET TO DEFAULTS"}</button>
-            {dirty && <span className="mono text-[10px]" style={{ color: "#fbbf24" }}>unsaved changes</span>}
+            {dirty && <span className="mono text-[10px]" style={{ color: "var(--warn)" }}>unsaved changes</span>}
           </div>
         </>)}
-      <div className="mt-2"><ErrorLine msg={err} />{ok && <p className="mono text-[11px]" style={{ color: "#4ade80" }}><Check size={11} className="inline" /> {ok}</p>}</div>
+      <div className="mt-2"><ErrorLine msg={err} />{ok && <p className="mono text-[11px]" style={{ color: "var(--ok)" }}><Check size={11} className="inline" /> {ok}</p>}</div>
     </Panel>
   );
 }
@@ -354,7 +354,7 @@ export default function Admin() {
         <p className="text-[13px]" style={{ color: "var(--muted)" }}>Choose a site or one of its cameras, then set what to watch for, which alarms to raise, who is told, and how to reach the camera. Changes are stored in the database and applied within seconds. No .env edits, no restart.</p>
       </div>
       {ov.data && !ov.data.auth_required && (
-        <div className="rounded-lg border px-3 py-2 text-[12px] flex gap-2 items-start" style={{ borderColor: "#fbbf24", color: "#fbbf24" }}>
+        <div className="rounded-lg border px-3 py-2 text-[12px] flex gap-2 items-start" style={{ borderColor: "var(--warn)", color: "var(--warn)" }}>
           <ShieldAlert size={14} className="mt-0.5 shrink-0" /><span>Anyone who can reach this dashboard can change these settings. Before exposing it beyond this laptop set <span className="mono">AUTH_REQUIRED=true</span> and <span className="mono">ADMIN_TOKEN</span> in .env.</span>
         </div>)}
       {ov.data && !ov.data.secrets_key_custom && (
@@ -376,7 +376,7 @@ export default function Admin() {
                     <li key={c.camera_id}>
                       <button onClick={() => { setTid(x.id); setCam(c.camera_id); }} className="w-full text-left rounded-lg border px-2 py-1.5 flex items-center gap-2"
                         style={{ borderColor: tid === x.id && cam === c.camera_id ? "var(--accent)" : "var(--line)" }}>
-                        <Camera size={12} style={{ color: !c.enabled ? "#8ea3c2" : c.ok === false ? "#f87171" : "#4ade80" }} />
+                        <Camera size={12} style={{ color: !c.enabled ? "var(--muted)" : c.ok === false ? "var(--bad)" : "var(--ok)" }} />
                         <span className="mono text-[11px] truncate flex-1">{c.camera_id}{c.customised ? " ●" : ""}</span>
                         <Chip>{c.enabled ? c.source : "paused"}</Chip>
                       </button>

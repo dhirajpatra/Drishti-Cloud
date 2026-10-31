@@ -4,7 +4,7 @@ import { api, type Notification } from "../api";
 import { relTime, useNow, usePoll } from "../lib";
 import { Empty, ErrorLine, Panel, Pill, btnGhost } from "./ui";
 
-const COLOR = { CRITICAL: "#f87171", WARNING: "#fbbf24", INFO: "#60a5fa" } as const;
+const COLOR = { CRITICAL: "var(--bad)", WARNING: "var(--warn)", INFO: "#60a5fa" } as const;
 
 /** Per-tenant notification centre: local-news hazards and confirmed alerts. Polls every 10 s; the page title shows the unread count. */
 export function Notifications({ tenantId }: { tenantId: string }) {
@@ -49,7 +49,7 @@ export function Notifications({ tenantId }: { tenantId: string }) {
             const Icon = n.kind === "news" ? Newspaper : n.kind === "camera" ? VideoOff : ShieldAlert;
             return (
               <li key={n.id} onClick={() => !n.read && markRead([n.id])} className="rounded-lg border p-2.5 flex gap-2.5 cursor-pointer"
-                style={{ borderColor: n.read ? "var(--line)" : c, opacity: n.read ? 0.55 : 1, background: n.read ? "transparent" : "#0b1424" }}>
+                style={{ borderColor: n.read ? "var(--line)" : c, opacity: n.read ? 0.55 : 1, background: n.read ? "transparent" : "var(--unread-bg)" }}>
                 <Icon size={16} style={{ color: c }} className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">

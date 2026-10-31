@@ -60,13 +60,13 @@ export function ApiKeyBox({ created, onDismiss }: { created: CreatedTenant; onDi
     try { await navigator.clipboard.writeText(created.api_key); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* clipboard blocked */ }
   };
   return (
-    <div className="rounded-xl border p-3" style={{ borderColor: "var(--warn)", background: "#2a210a" }}>
+    <div className="rounded-xl border p-3" style={{ borderColor: "var(--warn)", background: "var(--warn-bg)" }}>
       <div className="flex items-start justify-between gap-2">
         <p className="mono text-[11px] tracking-widest" style={{ color: "var(--warn)" }}>API KEY FOR {created.id} - SHOWN ONCE</p>
         <button onClick={onDismiss} aria-label="Dismiss" style={{ color: "var(--muted)" }}><X size={14} /></button>
       </div>
       <div className="flex items-center gap-2 mt-2">
-        <code className="mono text-[11px] flex-1 break-all rounded px-2 py-1" style={{ background: "#05080f", color: "#c7d7f5" }}>{created.api_key}</code>
+        <code className="mono text-[11px] flex-1 break-all rounded px-2 py-1" style={{ background: "var(--field)", color: "var(--ink2)" }}>{created.api_key}</code>
         <button onClick={copy} className="mono text-[10px] flex items-center gap-1 px-2 py-1 rounded border shrink-0" style={btnGhost}><Copy size={11} />{copied ? "COPIED" : "COPY"}</button>
       </div>
       <p className="text-[11px] mt-2" style={{ color: "var(--muted)" }}>Store it now; it cannot be retrieved later.</p>
@@ -95,7 +95,7 @@ export function TenantList({ tenants, loading, error, selected, onSelect, vertic
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="font-semibold truncate flex items-center gap-2">
-                  {t.alerts_24h > 0 && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#f87171" }} title="alerts in last 24h" />}
+                  {t.alerts_24h > 0 && <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "var(--bad)" }} title="alerts in last 24h" />}
                   <span className="truncate">{t.name || t.id}</span>
                 </p>
                 <p className="mono text-[10px] truncate" style={{ color: "var(--muted)" }}>{t.id}{t.location ? ` · ${t.location}` : ""}</p>
@@ -103,7 +103,7 @@ export function TenantList({ tenants, loading, error, selected, onSelect, vertic
               <Pill color={c}>{verticalLabels[t.vertical] ?? t.vertical}</Pill>
             </div>
             <div className="flex gap-4 mt-2 mono text-[11px]" style={{ color: "var(--muted)" }}>
-              <span><b style={{ color: t.alerts_24h > 0 ? "#f87171" : "var(--ink)" }}>{t.alerts_24h}</b> alerts</span>
+              <span><b style={{ color: t.alerts_24h > 0 ? "var(--bad)" : "var(--ink)" }}>{t.alerts_24h}</b> alerts</span>
               <span><b style={{ color: "var(--ink)" }}>{t.events_24h}</b> events</span>
               <span className="ml-auto">{relTime(t.last_seen, now)}</span>
             </div>
