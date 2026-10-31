@@ -13,6 +13,7 @@
 ![Neo4j](https://img.shields.io/badge/Neo4j-habit%20graph-018BFF) ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED) ![tests](https://img.shields.io/badge/tests-104%20passing-2EA043)
 
 ![Drishti dashboard](./docs/images/drishti-dashboard1.png)
+![Drishti HELP sign read](./docs/images/help_sign_read.png)
 
 ### 🎥 2-minute demo
 **Video:** `<add YouTube link here>` - kitchen camera (motionEye) → fall alert with proof picture → Neo4j habit graph → switch to mall and ICU tenants.

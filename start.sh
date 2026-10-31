@@ -14,4 +14,4 @@ if [ ! -f .env ]; then
   cp .env.example .env
 fi
 
-docker compose up -d --build --remove-orphans
+docker compose up -d --build --force-recreate --remove-orphans
