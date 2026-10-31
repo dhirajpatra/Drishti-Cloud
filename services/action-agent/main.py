@@ -15,7 +15,7 @@ from datetime import datetime
 
 import httpx
 
-from drishti import bus, db, graph, siteconfig
+from drishti import bus, db, graph, inventory, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import RANK, VERTICALS
@@ -136,6 +136,12 @@ def handle(p: dict, r) -> None:
     elif level != "NORMAL":
         log.info("alert for %s/%s suppressed by cooldown", tid, p.get("rule"))
 
+    if not p.get("static"):
+        try:
+            inventory.observe(tid, p.get("camera_id", "cam_1"), p.get("objects") or [], r)
+        except Exception:  # noqa: BLE001 - stock counting must never block the alert path
+            log.exception("inventory update failed")
+
     if not p.get("static") or level != "NORMAL":
         try:
             graph.record_event(tid, p["frame_id"], p.get("camera_id", "cam_1"), p.get("ts") or bus.utcnow_iso(), level,
@@ -173,6 +179,7 @@ def watchdog_loop() -> None:
     while not bus.stopping():
         try:
             camera_watchdog_once(r)
+            inventory.sweep(r)
         except Exception:  # noqa: BLE001
             log.exception("camera watchdog failed")
         for _ in range(6):

@@ -45,6 +45,7 @@ SCENARIOS: dict[str, list[tuple[str, dict, dict]]] = {
     ],
     "home_seniors": [
         ("morning_routine", {"pir": True, "temp": 28}, {"objects": [P(1), {"label": "stove", "bbox": [0.6, 0.4, 0.85, 0.7]}], "hour": 8}),
+        ("fridge_running_low", {"pir": True}, {"objects": [{"label": "milk", "count": 1}, {"label": "egg", "count": 2}], "hour": 9}),
         ("quiet_room", {"pir": False, "us_door": 30}, {"objects": [], "hour": 11}),
         ("door_open_night", {"pir": False, "us_door": 150}, {"objects": [{"label": "door", "bbox": [0.1, 0.1, 0.35, 0.95]}], "hour": 2}),
         ("morning_walk_habit", {"pir": True, "us_door": 150}, {"objects": [{"label": "door", "bbox": [0.1, 0.1, 0.35, 0.95]}, P(1)], "hour": 4}),

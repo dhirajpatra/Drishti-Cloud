@@ -1,7 +1,7 @@
 """Bootstrap: SOP docs, graph schema, optional demo tenants."""
 from __future__ import annotations
 
-from drishti import db, graph
+from drishti import db, graph, inventory
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import VERTICALS, sop_for
@@ -40,6 +40,13 @@ DEMO_GRAPH = {
 }
 
 
+# (item, kind, minimum stock): listed in the Stock panel; counts fill in from what the camera sees
+DEMO_INVENTORY = {
+    "home_1_bangalore": [("milk", "fridge", 2), ("egg", "fridge", 4)],
+    "icu_ward_1": [("paracetamol", "medicine", 5), ("saline", "medicine", 3)],
+}
+
+
 def register_in_graph(t: dict) -> None:
     v = VERTICALS[t["vertical"]]
     graph.upsert_tenant(t["id"], v["tenant_type"], t.get("location", ""), t["vertical"], sop_for(t["vertical"]))
@@ -65,3 +72,5 @@ def run() -> None:
             graph.add_person(tid, person, role)
         for desc, rule, start, end in DEMO_GRAPH[tid]["habits"]:
             graph.add_habit(tid, DEMO_GRAPH[tid]["people"][0][0], desc, rule=rule, start_hour=start, end_hour=end)
+        for item, kind, min_stock in DEMO_INVENTORY.get(tid, []):
+            inventory.upsert_item(tid, item, kind=kind, min_stock=min_stock)

@@ -7,6 +7,7 @@ import { ActuationList, EventTimeline } from "../components/EventsActuations";
 import { LiveCameras } from "../components/LiveCameras";
 import { Notifications } from "../components/Notifications";
 import { FeedSources } from "../components/FeedSources";
+import { Inventory } from "../components/Inventory";
 import { TestFrame } from "../components/TestFrame";
 import { KnowledgeGraph } from "../components/KnowledgeGraph";
 import { Stat } from "../components/ui";
@@ -90,6 +91,7 @@ export default function Dashboard() {
             <Notifications key={`n-${tenant.id}`} tenantId={tenant.id} />
             <LiveCameras key={tenant.id} tenantId={tenant.id} />
             <FeedSources key={`f-${tenant.id}`} tenantId={tenant.id} />
+            <Inventory key={`i-${tenant.id}`} tenantId={tenant.id} />
             <AlertFeed alerts={alerts.data} loading={alerts.loading} error={alerts.error} reload={alerts.reload} />
             <div className="grid xl:grid-cols-2 gap-4">
               <EventTimeline tenantId={tenant.id} events={events.data} loading={events.loading} error={events.error} />

@@ -20,7 +20,7 @@ from .config import settings
 
 _pool: ConnectionPool | None = None
 
-TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources")
+TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources", "inventory")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -95,6 +95,20 @@ CREATE TABLE IF NOT EXISTS camera_sources (
   enabled      boolean NOT NULL DEFAULT true,
   updated_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, camera_id)
+);
+CREATE TABLE IF NOT EXISTS inventory (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id         text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  name              text NOT NULL,
+  kind              text NOT NULL DEFAULT 'general',
+  camera_id         text,
+  qty               integer NOT NULL DEFAULT 0,
+  min_stock         integer NOT NULL DEFAULT 1,
+  expiry            date,
+  expiry_alert_days integer NOT NULL DEFAULT 7,
+  last_seen         timestamptz,
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, name)
 );
 CREATE TABLE IF NOT EXISTS notes (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),

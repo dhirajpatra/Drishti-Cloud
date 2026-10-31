@@ -239,7 +239,7 @@ export default function App(){
   const sim=[
     {t:"00:00",label:"PIR motion + camera frame captured on Pi 5",agent:"Edge"},
     {t:"00:01",label:"SAM 3.1 segments: person (unknown), stove ON, door open",agent:"Perception"},
-    {t:"00:02",label:"Face embedding → no match in 5-person graph → 'unknown'",agent:"Memory"},
+    {t:"00:02",label:"Habit graph: no known habit covers this hour (02:14)",agent:"Memory"},
     {t:"00:03",label:"Spark Guard: risk 0.86 · intruder candidate",agent:"Spark Guard"},
     {t:"00:05",label:"News check: no power-cut / maintenance notice for area",agent:"News"},
     {t:"00:07",label:"Wonder: not a known habit (2:14 AM, weekday) → ACT",agent:"Wonder"},
@@ -274,7 +274,7 @@ export default function App(){
 
       {/* 2 ARCHITECTURE */}
       <section id="arch" className="py-8">
-        <SectionHead kicker="01 · SYSTEM TOPOLOGY" title="Architecture — Edge to Cloud" sub="Each home is an autonomous edge tenant. Raw video never leaves the house — only a compressed scene-graph JSON crosses MQTT."/>
+        <SectionHead kicker="01 · SYSTEM TOPOLOGY" title="Architecture — Edge to Cloud" sub="Each site is an isolated tenant. Cameras and the Pi edge unit post frames and sensor JSON to the gateway over HTTP; only changed scenes reach a model."/>
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--accent)"}}>
             <p className="mono text-[11px] tracking-widest flex items-center gap-2" style={{color:"var(--accent)"}}><Home size={14}/> EDGE LAYER · PER TENANT</p>
@@ -294,7 +294,7 @@ export default function App(){
           <div className="lg:col-span-2 rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--line)"}}>
             <p className="mono text-[11px] tracking-widest flex items-center gap-2" style={{color:"var(--accent2)"}}><Cloud size={14}/> CLOUD LAYER · DOCKER COMPOSE</p>
             <div className="rounded-lg p-3 mt-4 flex items-center justify-between border" style={{borderColor:"var(--line)",background:"var(--field)"}}>
-              <div><p className="font-bold text-sm">API Gateway · FastAPI</p><p className="mono text-[11px]" style={{color:"var(--muted)"}}>Multi-tenant auth — tenant_id from JWT claim on every request</p></div><Shield size={18} style={{color:"var(--accent)"}}/>
+              <div><p className="font-bold text-sm">API Gateway · FastAPI</p><p className="mono text-[11px]" style={{color:"var(--muted)"}}>Multi-tenant auth — per-tenant API key or admin token on every request</p></div><Shield size={18} style={{color:"var(--accent)"}}/>
             </div>
             <div className="grid md:grid-cols-2 gap-2 mt-3">
               {agents.map(a=>{const Icon=a.icon; const active=activeAgent.id===a.id; return (
@@ -329,7 +329,7 @@ export default function App(){
           {[
             [Network,"Neo4j subgraph isolation","Every node carries tenant:{id}. All Cypher is scoped MATCH (t:Tenant {id:$tid})-[:KNOWS]->… — a query physically cannot traverse into another home's subgraph. Face embeddings never co-mingle."],
             [Radio,"Redis queues = simultaneity","Per-tenant topics home/{tenant_id}/scene with consumer groups. Spark Guard replicas pull in parallel; a busy Home 3 never blocks Home 1. Back-pressure per tenant, fair-share scheduling."],
-            [Shield,"Row + topic level isolation","Postgres RLS on tenant_id, MQTT ACLs per device certificate, JWT tenant claim verified at the FastAPI gateway. Each home sees only its timeline, its 5 persons, its habits."],
+            [Shield,"Row + topic level isolation","Postgres row-level security on tenant_id and per-tenant API keys checked at the FastAPI gateway. Each site sees only its own timeline, people and habits."],
           ].map(([Icon,t,d]:any)=>(<div key={t} className="rounded-2xl border p-5" style={{background:"var(--surface)",borderColor:"var(--line)"}}><Icon size={20} style={{color:"var(--accent)"}}/><h3 className="font-bold mt-3">{t}</h3><p className="text-sm mt-2" style={{color:"var(--muted)"}}>{d}</p></div>))}
         </div>
         <div className="rounded-xl border p-4 mt-4 mono text-[12px] overflow-x-auto" style={{background:"var(--field)",borderColor:"var(--line)",color:"var(--ink2)"}}>MQTT  home/home-01/scene ─┐<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;home/home-02/scene ─┼→ Redis Streams → [Perception ×3] → [Spark ×N] → [Wonder ×2] → Action → MQTT home/{"{id}"}/actuate<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;home/home-03/scene ─┘&nbsp;&nbsp;&nbsp;&nbsp;↑ per-tenant consumer groups · horizontal scale by adding replicas</div>
@@ -376,7 +376,7 @@ CREATE CONSTRAINT person_key IF NOT EXISTS
 
       {/* 6 COMPOSE */}
       <section className="py-8">
-        <SectionHead kicker="05 · INFRASTRUCTURE" title="Docker Compose — Whole Cloud, One Command" sub="Eleven services. Secrets via environment — LLAMA_API_KEY powers every Meta Model API call."/>
+        <SectionHead kicker="05 · INFRASTRUCTURE" title="Docker Compose — Whole Cloud, One Command" sub="Fourteen services. Secrets via environment — LLAMA_API_KEY powers every Meta Model API call."/>
         <CodeBlock title="docker-compose.yml" code={compose} accent="var(--warn)"/>
       </section>
 
@@ -403,9 +403,9 @@ CREATE CONSTRAINT person_key IF NOT EXISTS
 cp .env.example .env        # set LLAMA_API_KEY, NEO4J_PASSWORD
 docker compose up -d --build
 docker compose ps           # 11 services healthy
-# enrol a home (max 5 persons):
-curl -X POST localhost:8080/tenants/home-01/persons \\
-  -H "Authorization: Bearer $JWT" -d '{"name":"Asha"}'
+# create a tenant (admin):
+curl -X POST localhost:8000/tenants -H "Content-Type: application/json" \\
+  -d '{"id":"home-02","vertical":"home_seniors"}'
 open http://localhost:7474  # Neo4j Browser — watch the graph grow`}/>
           <div className="space-y-3">
             {[["1 · Compose (demo / pilot)","All agents + Neo4j + Redis + Postgres on one VM. pi-edge-simulator replays telemetry so judges see alerts without hardware."],["2 · Scale the hot agents","Perception & Spark Guard scale horizontally (stateless, Redis-fed). Wonder scales on demand — it only wakes on candidates."],["3 · Modal / Baseten (production)","GPU agents (SAM post-processing, Llama embeddings) move to Modal/Baseten autoscaling; Neo4j Aura + managed Redis/Postgres. Edge stays on Pi 5 — cloud cost per home stays in paise, not rupees."]].map(([t,d])=>(<div key={t} className="rounded-2xl border p-4" style={{background:"var(--surface)",borderColor:"var(--line)"}}><p className="font-bold">{t}</p><p className="text-sm mt-1" style={{color:"var(--muted)"}}>{d}</p></div>))}
