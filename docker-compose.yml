@@ -72,7 +72,7 @@ services:
       POSTGRES_USER: drishti
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-drishti123}
     ports: ["${BIND_ADDR:-127.0.0.1}:5432:5432"]
-    volumes: ["pg_data:/var/lib/postgresql/data"]
+    volumes: ["pg_data:/var/lib/postgresql/data", "./db/init:/docker-entrypoint-initdb.d"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U drishti -d drishti"]
       interval: 5s

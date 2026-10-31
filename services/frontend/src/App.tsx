@@ -5,9 +5,16 @@ import { usePoll } from "./lib";
 import Dashboard from "./pages/Dashboard";
 import Architecture from "./pages/Architecture";
 import { Pill, btnPrimary, inputStyle } from "./components/ui";
+import { TenantAdmin } from "./components/TenantAdmin";
 
-type Tab = "dashboard" | "architecture";
-const tabFromHash = (): Tab => (window.location.hash === "#architecture" ? "architecture" : "dashboard");
+type Tab = "dashboard" | "architecture" | "admin";
+
+const tabFromHash = (): Tab => {
+  const hash = window.location.hash;
+  if (hash === "#architecture") return "architecture";
+  if (hash === "#admin") return "admin";
+  return "dashboard";
+};
 
 function TokenPrompt({ onDone }: { onDone: () => void }) {
   const [val, setVal] = useState(getToken());
@@ -19,9 +26,17 @@ function TokenPrompt({ onDone }: { onDone: () => void }) {
   return (
     <form onSubmit={submit} className="flex items-center gap-2">
       <KeyRound size={14} style={{ color: "#fbbf24" }} />
-      <input type="password" value={val} onChange={(e) => setVal(e.target.value)} placeholder="Admin token required"
-        className="rounded-lg px-2 py-1 text-[12px] border outline-none w-40 sm:w-52" style={{ ...inputStyle, borderColor: "#fbbf24" }} />
-      <button className="mono text-[11px] px-3 py-1 rounded-lg" style={btnPrimary}>SAVE</button>
+      <input
+        type="password"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        placeholder="Admin token required"
+        className="rounded-lg px-2 py-1 text-[12px] border outline-none w-40 sm:w-52"
+        style={{ ...inputStyle, borderColor: "#fbbf24" }}
+      />
+      <button className="mono text-[11px] px-3 py-1 rounded-lg" style={btnPrimary}>
+        SAVE
+      </button>
     </form>
   );
 }
@@ -46,31 +61,58 @@ function HealthPill() {
 export default function App() {
   const [tab, setTab] = useState<Tab>(tabFromHash);
   const [needToken, setNeedToken] = useState(false);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>("home_1_bangalore");
 
   useEffect(() => {
     const onHash = () => setTab(tabFromHash());
     window.addEventListener("hashchange", onHash);
     const off = onUnauthorized(() => setNeedToken(true));
-    return () => { window.removeEventListener("hashchange", onHash); off(); };
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      off();
+    };
   }, []);
 
-  const go = (t: Tab) => { window.location.hash = t; setTab(t); };
+  const go = (t: Tab) => {
+    window.location.hash = t;
+    setTab(t);
+  };
 
   return (
     <div className="min-h-screen overflow-x-clip" style={{ background: "var(--bg)" }}>
-      <header className="sticky top-0 z-40 backdrop-blur border-b" style={{ background: "rgba(7,11,18,0.92)", borderColor: "var(--line)" }}>
+      <header
+        className="sticky top-0 z-40 backdrop-blur border-b"
+        style={{ background: "rgba(7,11,18,0.92)", borderColor: "var(--line)" }}
+      >
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg grid place-items-center font-bold" style={{ background: "var(--accent)", color: "#04121a" }}><Eye size={20} /></div>
+            <div
+              className="w-9 h-9 rounded-lg grid place-items-center font-bold"
+              style={{ background: "var(--accent)", color: "#04121a" }}
+            >
+              <Eye size={20} />
+            </div>
             <div>
               <p className="font-bold leading-none">DRISHTI CLOUD</p>
-              <p className="mono text-[10px] tracking-widest hidden sm:block" style={{ color: "var(--muted)" }}>SECURITY SENTINEL CONSOLE</p>
+              <p className="mono text-[10px] tracking-widest hidden sm:block" style={{ color: "var(--muted)" }}>
+                SECURITY SENTINEL CONSOLE
+              </p>
             </div>
           </div>
           <nav className="flex gap-1 mono text-[11px] tracking-widest">
-            {(["dashboard", "architecture"] as Tab[]).map((t) => (
-              <button key={t} onClick={() => go(t)} className="px-3 py-1.5 rounded-lg border uppercase"
-                style={{ borderColor: tab === t ? "var(--accent)" : "var(--line)", color: tab === t ? "var(--accent)" : "var(--muted)", background: tab === t ? "var(--surface2)" : "transparent" }}>{t}</button>
+            {(["dashboard", "architecture", "admin"] as Tab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => go(t)}
+                className="px-3 py-1.5 rounded-lg border uppercase"
+                style={{
+                  borderColor: tab === t ? "var(--accent)" : "var(--line)",
+                  color: tab === t ? "var(--accent)" : "var(--muted)",
+                  background: tab === t ? "var(--surface2)" : "transparent",
+                }}
+              >
+                {t}
+              </button>
             ))}
           </nav>
           <div className="flex items-center gap-3 flex-wrap ml-auto">
@@ -79,7 +121,17 @@ export default function App() {
           </div>
         </div>
       </header>
-      {tab === "dashboard" ? <main className="max-w-7xl mx-auto px-4"><Dashboard /></main> : <Architecture />}
+      {tab === "admin" ? (
+        <main className="max-w-7xl mx-auto px-4 py-4">
+          <TenantAdmin tenantId={selectedTenantId} />
+        </main>
+      ) : tab === "dashboard" ? (
+        <main className="max-w-7xl mx-auto px-4">
+          <Dashboard />
+        </main>
+      ) : (
+        <Architecture />
+      )}
     </div>
   );
 }
