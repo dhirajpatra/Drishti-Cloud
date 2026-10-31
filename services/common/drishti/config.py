@@ -80,6 +80,9 @@ class Settings:
         self.burst_frames = _i("BURST_FRAMES", 4)                    # frames grabbed over ~3 s when a motion hook fires (1 = off)
         self.burst_spacing_sec = _f("BURST_SPACING_SEC", 0.8)
         self.storyboard = _b("STORYBOARD", True)                     # send Spark a before/burst/now sequence instead of one still
+        self.secrets_key = _s("SECRETS_KEY")                          # Fernet key encrypting camera passwords stored in Postgres
+        self.postgres_password = _s("POSTGRES_PASSWORD", "drishti123")
+        self.site_cache_sec = _f("SITE_CONFIG_CACHE_SEC", 10)        # how long an agent may use a cached admin configuration
         self.camera_offline_sec = _i("CAMERA_OFFLINE_SEC", 1200)     # silent this long -> "camera offline" notification
         self.motion_hook_token = _s("MOTION_HOOK_TOKEN")            # secret in the motionEye web-hook URL (?token=...)
         self.motion_hook_cooldown_sec = _i("MOTION_HOOK_COOLDOWN_SEC", 60)   # one analysis per camera per this many seconds

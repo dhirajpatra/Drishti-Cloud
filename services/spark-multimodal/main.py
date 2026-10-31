@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from drishti import bus, db, llm, rules
+from drishti import bus, db, llm, rules, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import LEVELS, RANK, VERTICALS, max_level
@@ -30,7 +30,7 @@ DOCS: Safety SOP:
 {guidance}
 Local time hour: {hour}:00. Rule engine already found: {findings}
 Allowed rule ids: {rule_ids}
-Decide: NORMAL, ALERT, CRITICAL. Explain the reason. List the objects involved.
+{extra}Decide: NORMAL, ALERT, CRITICAL. Explain the reason. List the objects involved.
 Return JSON only: {{"level":"NORMAL|ALERT|CRITICAL","rule":"<one allowed rule id or llm_assessment>",
 "reason":"<one short sentence>","rationale":"<2-3 sentences citing the SOP>","objects":["<labels>"],
 "speak_text":"<short sentence to say aloud at the scene>"}}"""
@@ -65,15 +65,29 @@ def sop(vertical: str) -> str:
     return text
 
 
-def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | None:
-    v, s = p["vertical"], p.get("sensors") or {}
+def extra_prompt(cfg: dict, hour: int) -> str:
+    """Site-specific watch rules and notes the owner typed in the Admin page."""
+    lines = []
+    if cfg.get("instructions"):
+        lines.append("Site notes from the owner: " + cfg["instructions"])
+    for c in cfg.get("custom_rules") or []:
+        if c.get("enabled", True) and rules._in_hours(c.get("hours"), hour):
+            lines.append(f"Custom rule id custom:{c['id']} ({c['level']}): {c['text']}")
+    if len(lines) > (1 if cfg.get("instructions") else 0):
+        lines.append("If a custom rule is clearly happening, answer with rule \"custom:<id>\" and at least its level.")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r, cfg: dict | None = None) -> dict | None:
+    v, s, cfg = p["vertical"], p.get("sensors") or {}, cfg or {}
     masks = [f"{o['label']}@{[round(x, 2) for x in o['bbox']]}" for o in (p.get("objects") or [])[:40]]
     prompt = CORE_PROMPT.format(
         vertical=v, tenant_id=p["tenant_id"], masks=", ".join(masks) or "none", pir=s.get("pir"),
         picture_note=picture_note(p), us_front=s.get("us_front"), us_door=s.get("us_door"), gesture=s.get("gesture"), temp=s.get("temp"),
         ocr=p.get("ocr_texts") or [], audio=str(s.get("audio_transcript") or "")[:200], sop=sop(v),
         guidance=guidance(v), hour=hour, findings=[h["rule"] for h in hits] or "none",
-        rule_ids=VERTICALS[v]["rules"],
+        rule_ids=VERTICALS[v]["rules"] + [f"custom:{c['id']}" for c in cfg.get("custom_rules") or [] if c.get("enabled", True)],
+        extra=extra_prompt(cfg, hour),
     )
     out = llm.chat_json(settings.spark_model, [{"role": "user", "content": [{"type": "text", "text": prompt}, llm.image_part(jpeg)]}],
                         max_tokens=350, r=r, reasoning=False)
@@ -83,7 +97,11 @@ def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | No
     rule = out.get("rule")
     if isinstance(rule, str):                         # 'fight', 'flame', 'gun' ... fold into the one rule id for that hazard
         rule = {"violence": "physical_abuse", "fire": "fire_smoke", "smoke": "fire_smoke", "weapon": "weapon_visible"}.get(rules.norm_label(rule), rule)
-    rule = rule if rule in VERTICALS[v]["rules"] else "llm_assessment"
+    custom = {c["id"]: c for c in cfg.get("custom_rules") or [] if c.get("enabled", True)}
+    if isinstance(rule, str) and rule.startswith("custom:") and rule[7:] in custom:
+        level = max(level, custom[rule[7:]]["level"], key=lambda x: RANK.get(x, 0))
+    elif rule not in VERTICALS[v]["rules"]:
+        rule = "llm_assessment"
     objs = [rules.norm_label(x) for x in out.get("objects", []) if isinstance(x, str)][:12]
     return {
         "level": level, "rule": rule, "reason": str(out.get("reason", ""))[:300],
@@ -94,7 +112,8 @@ def ask_spark(p: dict, jpeg: bytes, hits: list[dict], hour: int, r) -> dict | No
 def handle(p: dict, r) -> None:
     tid, cam, vertical = p["tenant_id"], p.get("camera_id", "cam_1"), p["vertical"]
     hour = rules.effective_hour(p, bus.local_hour())
-    hits = rules.evaluate(vertical, p, r, bus.local_hour())
+    cfg = siteconfig.effective(tid, cam, vertical)
+    hits = rules.evaluate(vertical, p, r, bus.local_hour(), cfg)
     last_key = f"lastassess:{tid}:{cam}"
     llm_res = None
     source = "rules"
@@ -104,19 +123,22 @@ def handle(p: dict, r) -> None:
         if cached:
             llm_res, source = json.loads(cached), "cache"
     elif not settings.mock_mode and llm.budget_ok(r, settings.spark_model):
-        gated = settings.low_cost_mode and not hits and not r.set(f"sparkgate:{tid}:{cam}", 1, nx=True, ex=max(1, min(settings.sample_interval_sec, settings.min_analysis_gap_sec)))
+        gated = settings.low_cost_mode and not hits and not r.set(f"sparkgate:{tid}:{cam}", 1, nx=True, ex=max(1, min(cfg["sampling"]["sample_interval_sec"], cfg["sampling"]["min_analysis_gap_sec"])))
         if not gated:
             jpeg = (bus.get_story(p["frame_id"]) if p.get("storyboard") else None) or bus.get_frame(p["frame_id"])
             if jpeg is not None:
                 try:
-                    llm_res, source = ask_spark(p, jpeg, hits, hour, r), "spark"
+                    llm_res, source = ask_spark(p, jpeg, hits, hour, r, cfg), "spark"
                     r.set(last_key, json.dumps(llm_res), ex=3600)
                 except Exception:  # noqa: BLE001 - API down: degrade to the rule engine, don't lose the frame
                     log.exception("Spark call failed - using rule engine only")
                     source = "rules_fallback"
 
     findings = [{"rule": h["rule"], "level": h["level"], "reason": h["reason"], "objects": h["objects"], "speak": h["speak"],
-                 "source": "rule"} for h in hits]
+                 "source": "rule", **({"cooldown_sec": h["cooldown_sec"]} if "cooldown_sec" in h else {})} for h in hits]
+    if llm_res and llm_res["rule"] in (cfg.get("rules") or {}):       # the Admin page can mute / re-level / schedule AI findings too
+        ov = rules.apply_overrides([{"rule": llm_res["rule"], "level": llm_res["level"], "reason": "", "objects": [], "speak": ""}], cfg, hour)
+        llm_res = {**llm_res, "level": ov[0]["level"]} if ov else {**llm_res, "level": "NORMAL"}
     if llm_res and llm_res["level"] != "NORMAL":
         findings.append({"rule": llm_res["rule"], "level": llm_res["level"], "reason": llm_res["reason"],
                          "objects": llm_res["objects"], "speak": llm_res["speak_text"], "source": "llm"})
@@ -126,7 +148,7 @@ def handle(p: dict, r) -> None:
         level = max_level(*[f["level"] for f in findings])
         rationale = (llm_res or {}).get("rationale") if llm_res and llm_res["level"] != "NORMAL" else ""
         out = {"level": level, "rule": top["rule"], "reason": top["reason"], "involved": top["objects"],
-               "speak_text": top["speak"],
+               "speak_text": top["speak"], **({"cooldown_sec": top["cooldown_sec"]} if "cooldown_sec" in top else {}),
                "rationale": rationale or f"Rule '{top['rule']}' matched against the {VERTICALS[vertical]['label']} SOP."}
     else:
         out = {"level": "NORMAL", "rule": "", "reason": (llm_res or {}).get("reason") or "No hazard detected",

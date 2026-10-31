@@ -4,17 +4,12 @@ import { api, getToken, onUnauthorized, setToken } from "./api";
 import { usePoll } from "./lib";
 import Dashboard from "./pages/Dashboard";
 import Architecture from "./pages/Architecture";
+import Admin from "./pages/Admin";
 import { Pill, btnPrimary, inputStyle } from "./components/ui";
 import { TenantAdmin } from "./components/TenantAdmin";
 
-type Tab = "dashboard" | "architecture" | "admin";
-
-const tabFromHash = (): Tab => {
-  const hash = window.location.hash;
-  if (hash === "#architecture") return "architecture";
-  if (hash === "#admin") return "admin";
-  return "dashboard";
-};
+type Tab = "dashboard" | "admin" | "architecture";
+const tabFromHash = (): Tab => (window.location.hash === "#architecture" ? "architecture" : window.location.hash === "#admin" ? "admin" : "dashboard");
 
 function TokenPrompt({ onDone }: { onDone: () => void }) {
   const [val, setVal] = useState(getToken());
@@ -100,19 +95,9 @@ export default function App() {
             </div>
           </div>
           <nav className="flex gap-1 mono text-[11px] tracking-widest">
-            {(["dashboard", "architecture", "admin"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => go(t)}
-                className="px-3 py-1.5 rounded-lg border uppercase"
-                style={{
-                  borderColor: tab === t ? "var(--accent)" : "var(--line)",
-                  color: tab === t ? "var(--accent)" : "var(--muted)",
-                  background: tab === t ? "var(--surface2)" : "transparent",
-                }}
-              >
-                {t}
-              </button>
+            {(["dashboard", "admin", "architecture"] as Tab[]).map((t) => (
+              <button key={t} onClick={() => go(t)} className="px-3 py-1.5 rounded-lg border uppercase"
+                style={{ borderColor: tab === t ? "var(--accent)" : "var(--line)", color: tab === t ? "var(--accent)" : "var(--muted)", background: tab === t ? "var(--surface2)" : "transparent" }}>{t}</button>
             ))}
           </nav>
           <div className="flex items-center gap-3 flex-wrap ml-auto">
@@ -121,17 +106,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      {tab === "admin" ? (
-        <main className="max-w-7xl mx-auto px-4 py-4">
-          <TenantAdmin tenantId={selectedTenantId} />
-        </main>
-      ) : tab === "dashboard" ? (
-        <main className="max-w-7xl mx-auto px-4">
-          <Dashboard />
-        </main>
-      ) : (
-        <Architecture />
-      )}
+      {tab === "dashboard" ? <main className="max-w-7xl mx-auto px-4"><Dashboard /></main> : tab === "admin" ? <main className="max-w-7xl mx-auto px-4 pb-10"><Admin /></main> : <Architecture />}
     </div>
   );
 }

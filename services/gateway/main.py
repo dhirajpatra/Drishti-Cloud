@@ -21,11 +21,12 @@ from fastapi.responses import Response
 from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from drishti import bus, db, graph
+from drishti import bus, db, graph, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import VERTICALS, sop_for
 import seed
+from admin import build_router
 
 log = get_logger("gateway")
 
@@ -99,6 +100,9 @@ def _public(t: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- health
+app.include_router(build_router(require_admin, _tenant))
+
+
 @app.get("/health")
 def health():
     redis_ok = True
@@ -301,19 +305,20 @@ def ingest(
     hkey = f"scenehash:{tenant_id}:{camera_id}"
     prev = r.hgetall(hkey)
     now = time.time()
+    samp = siteconfig.effective(tenant_id, camera_id, t["vertical"])["sampling"]
     pir = sensor_data.get("pir")
     static, change = False, None
     if prev and not force and settings.low_cost_mode and pir is not True and not just_blocked:
         age = now - float(prev["analyzed_ts"])
         if prev.get("sig"):
             change = change_fraction(sig, json.loads(prev["sig"]), settings.cell_delta)
-            changed = change > settings.change_fraction
+            changed = change > samp["change_fraction"]
         else:  # entry written by an older version: fall back to the perceptual hash
             changed = bin(h ^ int(prev["hash"])).count("1") > settings.hash_distance
         # idle while nothing moved; also hold a changed scene back until the minimum gap since the last analysis has passed
         # (the baseline stays put, so the change is picked up by the first sample after the gap)
         big_jump = change is not None and change >= settings.burst_fraction and age >= settings.burst_gap_sec   # fight / fall / panic
-        static = age < settings.force_refresh_sec and (not changed or (age < settings.min_analysis_gap_sec and not big_jump))
+        static = age < settings.force_refresh_sec and (not changed or (age < samp["min_analysis_gap_sec"] and not big_jump))
     if not static:
         r.hset(hkey, mapping={"hash": str(h), "sig": json.dumps(sig), "analyzed_ts": str(now)})
         r.expire(hkey, 7 * 86400)
@@ -326,7 +331,7 @@ def ingest(
             hires.save(hb, "JPEG", quality=85)
             bus.put_hires(frame_id, hb.getvalue())
         panels: list[tuple[Image.Image, str]] = []
-        if settings.storyboard:
+        if samp["storyboard"]:
             before, age = bus.get_baseline(tenant_id, camera_id)
             if before is not None and age is not None:
                 panels.append((Image.open(io.BytesIO(before)), f"BEFORE {ago(age)}"))
@@ -393,7 +398,7 @@ class FeedBody(BaseModel):
 def list_feeds(tenant_id: str, request: Request):
     """Camera sources added from the dashboard (credentials in the URL are masked)."""
     require_tenant(tenant_id, request)
-    return [{"camera_id": f["camera"], "url": _mask(f["url"])} for f in bus.registered_feeds(tenant_id)]
+    return [{"camera_id": c["camera_id"], "url": _mask(siteconfig.build_url(c))} for c in db.list_camera_sources(tenant_id)]
 
 
 @app.post("/tenants/{tenant_id}/feeds", status_code=201)
@@ -407,14 +412,18 @@ def add_feed(tenant_id: str, body: FeedBody, request: Request):
         raise HTTPException(422, "url must be http(s)://, rtsp(s):// or /app/feeds/<file>")
     if re.match(r"https?://([^/@]*@)?([^/:]*\.)?(facebook|fb|instagram)\.(com|watch)\b", body.url, re.I):
         raise HTTPException(422, "Facebook/Instagram pages cannot be read as a camera feed; use the camera's own RTSP/HTTP URL")
-    bus.put_feed(tenant_id, body.camera_id, t["vertical"], body.url)
+    parts = siteconfig.parse_url(body.url)
+    try:
+        siteconfig.save_source(tenant_id, body.camera_id, {**parts, "enabled": True})
+    except siteconfig.ConfigError as exc:
+        raise HTTPException(422, str(exc)) from None
     return {"camera_id": body.camera_id, "url": _mask(body.url), "note": "picked up on the next sample"}
 
 
 @app.delete("/tenants/{tenant_id}/feeds/{camera_id}")
 def remove_feed(tenant_id: str, camera_id: str, request: Request):
     require_tenant(tenant_id, request)
-    if not bus.del_feed(tenant_id, camera_id):
+    if not db.delete_camera_source(tenant_id, camera_id):
         raise HTTPException(404, "no such registered camera (cameras from RTSP_FEEDS are managed in .env)")
     return {"ok": True}
 
