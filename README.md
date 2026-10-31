@@ -1,7 +1,9 @@
-# Drishti Cloud
+# Drishti - Muse App for Security Agencies
 
-**A multi-agent, multi-tenant, multi-modal safety platform that watches a camera the way a caring person would: it understands the
-scene, remembers what is normal for *this* home, school, mall or ICU, and speaks up fast when something is wrong.**
+> **Personal security superintelligence that watches your world, so you don't have to.**
+> One dashboard for a security agency's clients: mall, home seniors, school, ICU. It sees every camera, remembers what is normal for each site, and speaks up fast on WhatsApp and on the spot when something is wrong.
+
+> Powered by Meta: **`sam-3.1`** sees, **`muse-spark-1.3`** understands images + sensors + text + the site's written SOP, **`muse-wonder-1.0`** reasons over each site's habit graph (Neo4j) and local news, and the **WhatsApp Business Cloud API** acts.
 
 > **Meta Global AI Developer Hackathon 2026** · Indie Track · *Build for Your World + Push the Frontier*
 
@@ -12,6 +14,26 @@ scene, remembers what is normal for *this* home, school, mall or ICU, and speaks
 
 ![Drishti dashboard](./docs/images/drishti-dashboard1.png)
 
+### 🎥 2-minute demo
+**Video:** `<add YouTube link here>` - kitchen camera (motionEye) → fall alert with proof picture → Neo4j habit graph → switch to mall and ICU tenants.
+No video handy? Run the [two-minute quick start](#try-it-in-two-minutes-no-keys-no-camera) below: the built-in simulator raises one hazard per vertical.
+
+---
+
+## Why a "Muse App"?
+
+The Muse idea is a personal AI that **sees what you see, knows your world and acts for you**. Drishti applies it to a security agency owner who cannot watch every screen:
+
+| Muse idea | What Drishti does today |
+|---|---|
+| **Sees what you see** | Any camera that gives snapshots, MJPEG, RTSP, HLS or MP4 (motionEye, ESP32-CAM, phone, CCTV). `sam-3.1` segments each frame into objects (person, bag, stove, bed, violence, fire, weapon...). |
+| **Knows your world** | A Neo4j habit graph per site: "Dad naps 14:00-16:00", "cleaning crew parks trolleys 06:00-07:00". A known habit downgrades a matching alert; *False alarm* in the dashboard teaches a new habit. |
+| **Reads your docs** | Each vertical has a written SOP (stored in Postgres, editable) that `muse-spark-1.3` reads together with the picture and cites in its rationale. |
+| **Acts for you** | Spoken line on the edge speaker, OLED text, loud ISD1820 module, **WhatsApp Cloud API** messages, Slack-style webhook fallback, dashboard notifications. |
+| **Never sleeps** | A deterministic rule engine runs on every frame, even when the API is down or the daily budget is used up. |
+
+*Built to scale:* every agent is stateless with a per-tenant Redis stream, so more cameras and clients means `docker compose up --scale`. It has been run with a few tenants and cameras, not yet load-tested at 100 feeds.
+
 ---
 
 ## For reviewers: 60-second summary
@@ -19,7 +41,7 @@ scene, remembers what is normal for *this* home, school, mall or ICU, and speaks
 | | |
 |---|---|
 | **Problem** | One guard watches 20 CCTV screens and misses almost everything. A senior alone at home, a child at a school gate, a patient in an ICU bed: nobody is watching continuously. |
-| **What Drishti does** | Turns any ordinary camera (motionEye, RTSP, phone, ESP32-CAM) into a vigilant assistant for **home seniors, schools, malls and ICU wards**: falls, physical abuse and fights, unattended bags, strangers, patient out of bed, monitor alarms, stove left on, and more. |
+| **What Drishti does** | Turns any ordinary camera into a vigilant assistant for **home seniors, schools, malls and ICU wards**: falls, physical abuse and fights, unattended bags, strangers, patient out of bed, monitor alarms, stove left on, and more. |
 | **What is different** | (1) **Six cooperating agents** on a Redis bus, not one prompt. (2) **A per-site memory** (Neo4j habit graph) so "Dad naps at 3 pm" is not an alarm. (3) **World context**: local news can raise an alert's severity. (4) **Cost discipline**: the model is called only when the picture meaningfully changes, so it runs on a hobby budget. |
 | **Meta technology used** | Muse Spark (vision + decisions), Muse Wonder (reasoning over memory and news), SAM 3.1 (segmentation), Meta Responses API, **Muse Spark Open on Baseten** (hackathon credits, with automatic fallback), **WhatsApp Business Cloud API** (alerts), built and extended with **Muse Code** (`SKILL.md`). |
 | **Runs how** | `docker compose up -d` on a laptop today, the same file on any cloud later. **No API key needed to try it**: it starts in an offline `MOCK_MODE` with a built-in simulator. |
@@ -28,7 +50,7 @@ scene, remembers what is normal for *this* home, school, mall or ICU, and speaks
 ### Try it in two minutes (no keys, no camera)
 ```bash
 git clone https://github.com/dhirajpatra/Drishti-Cloud.git && cd Drishti-Cloud
-cp .env.example .env                  # leave LLAMA_API_KEY empty -> MOCK_MODE
+cp .env.example .env                  # leave LLAMA_API_KEY empty -> MOCK_MODE=auto
 echo "COMPOSE_PROFILES=sim" >> .env   # built-in simulator sends a hazard per vertical
 docker compose up -d --build
 open http://localhost:3000            # dashboard: alerts, live cameras, event timeline, notifications, knowledge graph
@@ -85,6 +107,8 @@ A guard does not judge one frozen picture. Drishti copies what a guard actually 
 | **Daily caps** | Atomic per-provider counters (`MAX_LLM_CALLS_PER_DAY`, `MAX_BASETEN_CALLS_PER_DAY`); after the cap the rule engine keeps working. |
 | **Provider chain** | `SPARK_MODEL=baseten:meta-models/muse-spark-open-1026\|muse-spark-1.3`: Baseten credits first, Meta as automatic fallback. |
 
+Real usage numbers for your own deployment are at `GET /usage` and in the dashboard usage tile (calls and tokens per model, per provider).
+
 ### Built to be operated
 - **Multi-tenant by design**: Postgres **row-level security** (forced), Neo4j `tenant_id` on every node, a Redis stream **per tenant per stage** with
   fair round-robin consumption, per-tenant API keys, optional admin token, per-tenant rate limit.
@@ -98,6 +122,7 @@ A guard does not judge one frozen picture. Drishti copies what a guard actually 
 
 ```mermaid
 flowchart LR
+  OWNER["Security agency<br/>Muse dashboard :3000"] --- GW
   CAM["Cameras<br/>motionEye / RTSP / HLS / phone"] -->|sample + motion hook| ING[feed-ingestor]
   PI["Pi edge<br/>sensors + mic"] -->|POST /ingest| GW
   ING --> GW["gateway (FastAPI)<br/>auth, idle gate, burst lane"]
@@ -112,12 +137,11 @@ flowchart LR
   ACT -->|speak / OLED| PI
   ACT -->|WhatsApp / webhook| MSG["Family, security,<br/>nurse station"]
   NEWS["news-context<br/>freenewsapi.io"] --> N4
-  NEWS -->|hazard headlines| UI
-  ACT -->|notifications| UI["React dashboard :3000"]
-  GW --> UI
+  NEWS -->|hazard headlines| GW
+  ACT -->|notifications| GW
 ```
 
-The model providers behind `SAM`, `OCR`, `Spark` and `Wonder`: **Meta Responses API** and/or **Baseten** (see [Models](#models-and-providers)).
+The model providers behind `SAM`, `OCR`, `Spark` and `Wonder`: **Meta Responses API** (`https://api.meta.ai/v1/responses`) and/or **Baseten** (see [Models](#models-and-providers)).
 
 | Service | Role |
 |---|---|
@@ -156,7 +180,7 @@ Each vertical is a SOP document + a prompt file (`services/spark-multimodal/prom
 | Segmentation | `sam-3.1` (Meta) | Auto-fallback to the Spark vision model for an hour if it returns no usable text (`SAM_MODE`). |
 | Vision decision | `muse-spark-1.3` (Meta) | Or `baseten:meta-models/muse-spark-open-1026` first, Meta second. |
 | Reasoning | `muse-wonder-1.0` (Meta) | Runs only for ALERTs; never lowers a CRITICAL. |
-| Muse Image | not in the detection path | It **generates / edits** pictures (it does not analyse or segment them), and a generator can invent people or objects, so it is deliberately *not* used to "enhance" evidence. A good future use is a privacy-preserving illustrated alert card for WhatsApp. `scripts/probe_muse_image.py` shows what it returns on your key. |
+| Muse Image | not in the detection path | It **generates / edits** pictures (it does not analyse or segment them), and a generator can invent people or objects, so it is deliberately *not* used to "enhance" evidence. A good future use is a privacy-preserving illustrated alert card or daily report for WhatsApp. `scripts/probe_muse_image.py` shows what it returns on your key. |
 | OCR | `muse-spark-1.3` or Baseten | |
 
 `MODEL=a|b|c` tries each in order; missing key, exhausted daily budget, HTTP error or empty answer moves to the next. Baseten usage is counted
@@ -174,7 +198,7 @@ Key settings (see `.env.example` for all):
 
 | Setting | Purpose |
 |---|---|
-| `LLAMA_API_KEY`, `MOCK_MODE=false` | Meta Model API key; leave the key empty to run offline in mock mode. |
+| `LLAMA_API_KEY`, `MOCK_MODE` | Meta Model API key. Leave the key empty and keep `MOCK_MODE=auto` to run offline in mock mode. |
 | `BASETEN_API_KEY`, `SPARK_MODEL=baseten:...\|muse-spark-1.3` | Use the hackathon credits first, Meta as fallback. |
 | `RTSP_FEEDS=tenant:vertical:camera=url` | Cameras (e.g. `home_1_bangalore:home_seniors:kitchen=http://192.168.1.4:8081/`). |
 | `SAMPLE_INTERVAL_SEC`, `CHANGE_FRACTION`, `MIN_ANALYSIS_GAP_SEC`, `BURST_*` | Idle gate and burst lane. |
@@ -185,7 +209,7 @@ Key settings (see `.env.example` for all):
 
 ### 2. Run
 ```bash
-docker compose up -d --build
+docker compose up -d --build        # or ./start.sh
 docker compose logs -f spark-multimodal feed-ingestor
 ```
 Dashboard http://localhost:3000 · API http://localhost:8000/docs · Neo4j Browser http://localhost:7474.
@@ -241,6 +265,14 @@ Interactive docs at `/docs`.
 
 ---
 
+## Business model (proposed)
+Drishti targets **security agencies** that run monitoring for many small clients (homes, schools, malls, wards) and today pay guards to watch screens.
+- Per-camera monthly subscription for 24x7 monitoring with proof pictures and WhatsApp alerts.
+- Per-site running cost is about **Rs 60/month** of model API + **Rs 80** of electricity on the Pi edge (design target; see `GET /usage` for real numbers on your deployment).
+- Pricing and add-on modules below are proposals, not yet validated with customers.
+
+---
+
 ## How close is this to "human intelligence"? An honest answer
 It is a vigilant assistant, not a human replacement. It is strong at *noticing and escalating fast* (24 x 7, never tired, consistent), and it now reasons over
 sequences, context, memory and picture quality. It is still limited by what a camera at a sampled moment shows: no audio understanding yet, no identity, no
@@ -264,8 +296,8 @@ person always confirms a life-critical situation.
 
 ## Edge (Pi 5) and hardware
 `edge/pi_edge.py` reads the sensors (PIR, 2x HC-SR04 with divider, IR obstacle, DHT11, APDS-9960), grabs a frame and posts it to the gateway; it polls
-`/edge/{tenant}/actuate` to speak through a PAM8403 amp and 2" 5 W woofer, sound the ISD1820 module and draw on a 0.96" SSD1306 OLED. Per-site target:
-about **Rs 60/month** of API + **Rs 80** of electricity.
+`/edge/{tenant}/actuate` to speak through a PAM8403 amp and 2" 5 W woofer, sound the ISD1820 module and draw on a 0.96" SSD1306 OLED. The edge script has not
+been verified on real Pi hardware; the camera path in use today is motionEye over HTTP.
 ```bash
 cd edge && pip install -r requirements.txt
 python pi_edge.py --tenant_id home_1_bangalore --vertical home_seniors --gateway http://YOUR_CLOUD_IP:8000
@@ -273,7 +305,13 @@ python pi_edge.py --tenant_id home_1_bangalore --vertical home_seniors --gateway
 
 ---
 
-## Roadmap
+## Roadmap (not built yet)
+These are the next modules for the agency product. None of them exist in the code today.
+- **Inventory modules**: a fridge-inventory agent (SAM counts items, OCR reads expiry, habit graph learns consumption) and an ICU medicine-stock agent (min-stock rules, expiry alerts), both with editable settings in an Admin > Inventory tab.
+- **Price comparison and reorder suggestions** across shops/pharmacies, as suggestions an admin approves.
+- **Ask Drishti**: a chat box in the dashboard ("show ICU low medicines") answered by Muse Wonder, with Hindi/Kannada.
+- **WhatsApp two-way**: reply "ACK" to acknowledge an alert; daily visual report image generated by Muse Image.
+- **Upload SOP documents** (PDF) from the dashboard instead of editing the seeded text.
 - **Household roster** (opt-in): who lives here, so "an unknown adult" can be flagged without identifying anyone by face.
 - **Audio threat detection** (screams, glass break) with Whisper-class transcription feeding the same rules.
 - **Short clips instead of single frames** for fall and abuse confirmation.

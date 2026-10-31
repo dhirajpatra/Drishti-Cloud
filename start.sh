@@ -9,7 +9,9 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-# to keep only the main branch and delete all other merged branches
-git checkout main && git remote prune origin && git branch -r --merged | grep -v 'origin/main' | sed 's/origin\///' | xargs -I {} git push origin --delete {}
+if [ ! -f .env ]; then
+  echo "No .env found - copying .env.example (runs in MOCK_MODE until you add LLAMA_API_KEY)."
+  cp .env.example .env
+fi
 
 docker compose up -d --build --remove-orphans

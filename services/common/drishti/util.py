@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from .config import settings
-
 
 def now_local() -> datetime:
-    return datetime.now(ZoneInfo(settings.timezone))
+    """Current time in the deployment's timezone (TZ env var, set by docker compose)."""
+    return datetime.now(ZoneInfo(os.environ.get("TZ", "Asia/Kolkata")))
 
 
 def normalize_bbox(bbox, width: int | None = None, height: int | None = None):

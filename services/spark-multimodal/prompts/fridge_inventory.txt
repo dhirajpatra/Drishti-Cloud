@@ -1,0 +1,1 @@
+Count milk, eggs, curd, check expiry via OCR, alert if <2
