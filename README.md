@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="docs/images/logo.png" width="120" />
+</p>
 # Drishti - Muse App for Security Agencies
 
 > **Personal security superintelligence that watches your world, so you don't have to.**
