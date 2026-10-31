@@ -17,8 +17,8 @@ O = False  # optional
 PATCHES = [
     # ---------------------------------------------------------------- database: table + row-level security
     ("services/common/drishti/db.py", R,
-     'TENANT_TABLES = ("events", "alerts", "actuations", "notes")',
-     'TENANT_TABLES = ("events", "alerts", "actuations", "notes", "inventory")'),
+     'TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources")',
+     'TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources", "inventory")'),
     ("services/common/drishti/db.py", R,
      "CREATE TABLE IF NOT EXISTS notes (",
      """CREATE TABLE IF NOT EXISTS inventory (
@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS notes ("""),
 
     # ---------------------------------------------------------------- gateway: stock API
     ("services/gateway/main.py", R,
-     "from drishti import bus, db, graph\n",
-     "from drishti import bus, db, graph, inventory\n"),
+     "from drishti import bus, db, graph, siteconfig\n",
+     "from drishti import bus, db, graph, inventory, siteconfig\n"),
     ("services/gateway/main.py", R,
      '@app.get("/usage")\n',
      '''# --------------------------------------------------------------------------- stock (fridge / medicine / shelf)
@@ -90,8 +90,8 @@ def delete_inventory(tenant_id: str, name: str, request: Request):
 
     # ---------------------------------------------------------------- action agent: counts + expiry sweep
     ("services/action-agent/main.py", R,
-     "from drishti import bus, db, graph\n",
-     "from drishti import bus, db, graph, inventory\n"),
+     "from drishti import bus, db, graph, siteconfig\n",
+     "from drishti import bus, db, graph, inventory, siteconfig\n"),
     ("services/action-agent/main.py", R,
      '    if not p.get("static") or level != "NORMAL":\n        try:\n            graph.record_event(',
      '    if not p.get("static"):\n'

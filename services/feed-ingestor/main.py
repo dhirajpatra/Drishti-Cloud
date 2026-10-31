@@ -175,10 +175,11 @@ def handle_trigger(raw: str, env_feeds: list[dict] | None = None) -> bool:
 
 
 def trigger_loop(env_feeds: list[dict] | None = None) -> None:
-    r = bus.redis_client()
+    # dedicated client: its socket timeout must exceed the BLPOP block time or every idle wait raises a timeout
+    r = redis.Redis.from_url(settings.redis_uri, decode_responses=True, socket_timeout=TRIGGER_SOCKET_TIMEOUT_SEC)
     while not bus.stopping():
         try:
-            item = r.blpop(["camtest:req", "trigger:feed"], timeout=5)
+            item = r.blpop(["camtest:req", "trigger:feed"], timeout=TRIGGER_BLOCK_SEC)
             if item:
                 (test_connection if item[0] == "camtest:req" else handle_trigger)(item[1])
         except Exception:  # noqa: BLE001

@@ -21,7 +21,7 @@ from fastapi.responses import Response
 from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from drishti import bus, db, graph, siteconfig
+from drishti import bus, db, graph, inventory, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import VERTICALS, sop_for
@@ -574,6 +574,48 @@ def edge_actuate(tenant_id: str, request: Request, max_items: int = 10):
     if ids:
         db.set_actuation_status(ids, tenant_id, "delivered")
     return {"commands": cmds}
+
+
+# --------------------------------------------------------------------------- stock (fridge / medicine / shelf)
+class InventoryIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    kind: str = "general"
+    camera_id: str | None = Field(default=None, max_length=40)
+    min_stock: int = Field(default=1, ge=0, le=100000)
+    count: int | None = Field(default=None, ge=0, le=100000)      # optional manual correction of the seen count
+    expiry: date | None = None
+    expiry_alert_days: int = Field(default=7, ge=0, le=365)
+
+
+@app.get("/tenants/{tenant_id}/inventory")
+def list_inventory(tenant_id: str, request: Request):
+    """Tracked items with their last seen count, minimum, expiry and a status (ok / low / expiring / expired)."""
+    require_tenant(tenant_id, request)
+    return inventory.annotate(inventory.list_items(tenant_id))
+
+
+@app.post("/tenants/{tenant_id}/inventory", status_code=201)
+def save_inventory(tenant_id: str, body: InventoryIn, request: Request):
+    """Create or update a tracked item. The segmentation agent starts looking for it on the next analysed frame."""
+    require_tenant(tenant_id, request)
+    name = inventory.norm(body.name)
+    if not inventory.NAME_RE.match(name):
+        raise HTTPException(422, "name must be 1-40 chars of letters, digits, spaces or underscores")
+    if body.kind not in inventory.KINDS:
+        raise HTTPException(422, f"kind must be one of {list(inventory.KINDS)}")
+    if body.camera_id and not re.fullmatch(r"[A-Za-z0-9_\-]{1,40}", body.camera_id):
+        raise HTTPException(422, "camera_id must be 1-40 chars of [A-Za-z0-9_-]")
+    row = inventory.upsert_item(tenant_id, name, body.kind, body.camera_id or None, body.min_stock, body.expiry,
+                                body.expiry_alert_days, body.count)
+    return inventory.annotate([row])[0]
+
+
+@app.delete("/tenants/{tenant_id}/inventory/{name}")
+def delete_inventory(tenant_id: str, name: str, request: Request):
+    require_tenant(tenant_id, request)
+    if not inventory.delete_item(tenant_id, inventory.norm(name)):
+        raise HTTPException(404, "no such item")
+    return {"ok": True}
 
 
 @app.get("/usage")

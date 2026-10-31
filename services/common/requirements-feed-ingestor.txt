@@ -1,2 +1,4 @@
 redis>=5.0
 httpx>=0.27
+psycopg[binary,pool]>=3.2
+cryptography>=42

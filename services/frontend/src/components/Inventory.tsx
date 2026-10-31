@@ -5,10 +5,10 @@ import { relTime, useNow, usePoll } from "../lib";
 import { Empty, ErrorLine, Panel, Pill, btnGhost, btnPrimary, inputCls, inputStyle } from "./ui";
 
 const STATUS_COLOR: Record<InventoryItem["status"], string> = {
-  ok: "#34d399",
-  low: "#fbbf24",
-  expiring: "#fbbf24",
-  expired: "#f87171"
+  ok: "var(--ok)",
+  low: "var(--warn)",
+  expiring: "var(--warn)",
+  expired: "var(--bad)"
 };
 
 /** Stock on a fridge, medicine trolley or shelf. Counts come from what the camera sees; minimum stock and expiry are set here. */
@@ -68,7 +68,7 @@ export function Inventory({ tenantId }: { tenantId: string }) {
       right={
         <span
           className="mono text-[11px]"
-          style={{ color: attention ? "#fbbf24" : "var(--muted)" }}
+          style={{ color: attention ? "var(--warn)" : "var(--muted)" }}
         >
           {attention} need attention
         </span>

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 
-from drishti import bus, llm, simulate
+from drishti import bus, inventory, llm, simulate
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import VERTICALS
@@ -18,6 +18,14 @@ log = get_logger("sam3-segmenter")
 SEG_TTL = 3600
 SAM_OFF_KEY = "seg:sam_disabled"
 SAM_OFF_TTL = 3600
+
+
+def inventory_labels(tid: str) -> list[str]:
+    """Stock items this tenant tracks (fridge / medicine shelf): SAM is asked to find them in addition to the vertical's labels."""
+    try:
+        return [n.replace("_", " ") for n in inventory.tracked_labels(tid)][:30]
+    except Exception:  # noqa: BLE001 - never block perception on a database hiccup
+        return []
 
 
 def clamp_box(b) -> list[float] | None:
@@ -53,8 +61,8 @@ def mock_segment(p: dict) -> list[dict]:
     return clean([{"label": "person", "bbox": [0.35, 0.2, 0.65, 0.9], "confidence": 0.9}])
 
 
-def sam_segment(jpeg: bytes, vertical: str, r) -> list[dict]:
-    labels = ", ".join(VERTICALS[vertical]["sam_labels"])
+def sam_segment(jpeg: bytes, vertical: str, r, extra_labels=()) -> list[dict]:
+    labels = ", ".join([*VERTICALS[vertical]["sam_labels"], *extra_labels])
     prompt = (
         f"Segment all visible instances of: {labels}. Only include objects that are really visible. "
         'Return JSON only: {"objects":[{"label":"<name>","bbox":[x1,y1,x2,y2],"confidence":0.0-1.0}]} '
@@ -95,7 +103,7 @@ def handle(p: dict, r) -> None:
             log.warning("frame %s expired before segmentation - dropped", p["frame_id"])
             return
         try:
-            objects = sam_segment(jpeg, p["vertical"], r)
+            objects = sam_segment(jpeg, p["vertical"], r, extra_labels=inventory_labels(tid))
         except llm.CallBudgetExceeded:
             objects = clean(json.loads(cached)) if cached else []
             source = "budget_fallback"

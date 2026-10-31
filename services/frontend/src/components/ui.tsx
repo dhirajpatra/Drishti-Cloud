@@ -20,7 +20,7 @@ export function Panel({ kicker, title, right, children, className = "", style }:
 export function Pill({ color, children, solid = false }: { color: string; children: ReactNode; solid?: boolean }) {
   return (
     <span className="mono text-[10px] px-2 py-0.5 rounded-full border whitespace-nowrap"
-      style={{ borderColor: color, color: solid ? "#04121a" : color, background: solid ? color : "transparent" }}>
+      style={{ borderColor: color, color: solid ? "var(--on-accent)" : color, background: solid ? color : "transparent" }}>
       {children}
     </span>
   );
@@ -28,7 +28,7 @@ export function Pill({ color, children, solid = false }: { color: string; childr
 
 export function Chip({ children, color = "var(--muted)" }: { children: ReactNode; color?: string }) {
   return (
-    <span className="mono text-[10px] px-2 py-0.5 rounded border" style={{ borderColor: "var(--line)", color, background: "#05080f" }}>
+    <span className="mono text-[10px] px-2 py-0.5 rounded border" style={{ borderColor: "var(--line)", color, background: "var(--field)" }}>
       {children}
     </span>
   );
@@ -40,7 +40,7 @@ export function Empty({ children }: { children: ReactNode }) {
 
 export function ErrorLine({ msg }: { msg: string | null }) {
   if (!msg) return null;
-  return <p className="mono text-[11px] mb-2" style={{ color: "#f87171" }}>! {msg}</p>;
+  return <p className="mono text-[11px] mb-2" style={{ color: "var(--bad)" }}>! {msg}</p>;
 }
 
 export function Stat({ label, value, sub, color = "var(--accent)" }: { label: string; value: ReactNode; sub?: string; color?: string }) {
@@ -54,6 +54,6 @@ export function Stat({ label, value, sub, color = "var(--accent)" }: { label: st
 }
 
 export const inputCls = "w-full rounded-lg px-3 py-2 text-sm border outline-none focus:border-[var(--accent)]";
-export const inputStyle: CSSProperties = { background: "#05080f", borderColor: "var(--line)", color: "var(--ink)" };
-export const btnPrimary: CSSProperties = { background: "var(--accent)", color: "#04121a", fontWeight: 700 };
+export const inputStyle: CSSProperties = { background: "var(--field)", borderColor: "var(--line)", color: "var(--ink)" };
+export const btnPrimary: CSSProperties = { background: "var(--accent)", color: "var(--on-accent)", fontWeight: 700 };
 export const btnGhost: CSSProperties = { borderColor: "var(--line)", color: "var(--muted)" };

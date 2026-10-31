@@ -84,11 +84,11 @@ export function useNow(ms = 1000): number {
 
 export const VERTICAL_COLOR: Record<VerticalId, string> = {
   mall_security: "#fb923c",
-  home_seniors: "#34d399",
+  home_seniors: "var(--ok)",
   school_children: "#60a5fa",
   icu_hospital: "#f472b6",
 };
-export const verticalColor = (v: string): string => VERTICAL_COLOR[v as VerticalId] ?? "#8ea3c2";
+export const verticalColor = (v: string): string => VERTICAL_COLOR[v as VerticalId] ?? "var(--muted)";
 
 export const SENSOR_PRESETS: Record<VerticalId, string> = {
   mall_security: '{"pir":true,"us_front":75,"temp":32}',
@@ -97,4 +97,4 @@ export const SENSOR_PRESETS: Record<VerticalId, string> = {
   icu_hospital: '{"pir":true,"temp":26}',
 };
 
-export const LEVEL_COLOR = { CRITICAL: "#f87171", ALERT: "#fbbf24", NORMAL: "#34d399" } as const;
+export const LEVEL_COLOR = { CRITICAL: "var(--bad)", ALERT: "var(--warn)", NORMAL: "var(--ok)" } as const;

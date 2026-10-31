@@ -119,27 +119,15 @@ const jsonInit = (method: string, body: unknown): RequestInit => ({
 
 export interface FeedInfo { camera_id: string; url: string }
 export interface CameraInfo { camera_id: string; updated_at: string | null }
-// 1. Export the InventoryItem interface
 export interface InventoryItem {
-  id: string;
-  name: string;
-  kind: "fridge" | "medicine" | "general" | string;
-  count: number;
-  min_stock: number;
-  status: "ok" | "low" | "expiring" | "expired";
-  expiry?: string | null;
-  camera_id?: string | null;
-  last_seen?: string | null;
+  id: string; name: string; kind: string; camera_id: string | null; count: number; min_stock: number;
+  expiry: string | null; expiry_alert_days: number; last_seen: string | null;
+  status: "ok" | "low" | "expiring" | "expired"; days_to_expiry: number | null;
 }
-
-export interface SaveInventoryPayload {
-  name: string;
-  kind: string;
-  min_stock: number;
-  expiry: string | null;
-  camera_id: string | null;
+export interface InventoryInput {
+  name: string; kind: string; min_stock: number; expiry?: string | null; camera_id?: string | null;
+  count?: number | null; expiry_alert_days?: number;
 }
-
 export interface RuleCfg { enabled: boolean; level: AlertLevel | null; cooldown_sec: number | null; hours: [number, number] | null }
 export interface CustomRule { id: string; text: string; level: AlertLevel; enabled: boolean; hours: [number, number] | null }
 export interface LabelRule { id: string; label: string; op: "present" | "absent" | "count_gte"; value: number; for_sec: number; level: AlertLevel; message: string; enabled: boolean; hours: [number, number] | null }
@@ -210,6 +198,11 @@ export const api = {
     const res = await raw(`/tenants/${encodeURIComponent(tenantId)}/events/${encodeURIComponent(frameId)}/image`);
     return res.blob();
   },
+  inventory: (id: string) => json<InventoryItem[]>(`/tenants/${encodeURIComponent(id)}/inventory`),
+  saveInventory: (id: string, b: InventoryInput) =>
+    json<InventoryItem>(`/tenants/${encodeURIComponent(id)}/inventory`, jsonInit("POST", b)),
+  removeInventory: (id: string, name: string) =>
+    json<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/inventory/${encodeURIComponent(name)}`, { method: "DELETE" }),
   ingest: (tenantId: string, file: File, sensors: string, cameraId: string, force: boolean) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -217,26 +210,5 @@ export const api = {
     fd.append("camera_id", cameraId || "cam_1");
     fd.append("force", String(force));
     return json<IngestResult>(`/ingest/${encodeURIComponent(tenantId)}`, { method: "POST", body: fd });
-  },
-  inventory: async (tenantId: string): Promise<InventoryItem[]> => {
-    const res = await fetch(`/api/tenants/${tenantId}/inventory`);
-    if (!res.ok) throw new Error("Failed to fetch inventory");
-    return res.json();
-  },
-
-  saveInventory: async (tenantId: string, payload: SaveInventoryPayload): Promise<void> => {
-    const res = await fetch(`/api/tenants/${tenantId}/inventory`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error("Failed to save inventory item");
-  },
-
-  removeInventory: async (tenantId: string, itemIdentifier: string): Promise<void> => {
-    const res = await fetch(`/api/tenants/${tenantId}/inventory/${encodeURIComponent(itemIdentifier)}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) throw new Error("Failed to remove inventory item");
   },
 };

@@ -22,7 +22,7 @@ function AlertImage({ id, cache }: { id: string; cache: React.MutableRefObject<I
     return () => { alive = false; };
   }, [id, cache]);
   if (failed) return <div className="w-full sm:w-40 h-28 rounded-lg border grid place-items-center shrink-0" style={{ borderColor: "var(--line)", color: "var(--muted)" }}><ImageOff size={18} /></div>;
-  if (!url) return <div className="w-full sm:w-40 h-28 rounded-lg shrink-0 animate-pulse" style={{ background: "#05080f" }} />;
+  if (!url) return <div className="w-full sm:w-40 h-28 rounded-lg shrink-0 animate-pulse" style={{ background: "var(--field)" }} />;
   return <a href={url} target="_blank" rel="noreferrer" className="shrink-0 block"><img src={url} alt="Alert proof" className="w-full sm:w-40 h-28 object-cover rounded-lg border" style={{ borderColor: "var(--line)" }} /></a>;
 }
 
@@ -34,14 +34,14 @@ function AlertCard({ a, now, cache, onAck }: { a: Alert; now: number; cache: Rea
     try { await onAck(a.id, fa); } finally { setBusy(null); }
   };
   return (
-    <div className="rounded-xl border p-3 transition-opacity" style={{ borderColor: c, background: a.level === "CRITICAL" ? "#2a1013" : "#2a210a", opacity: a.acknowledged ? 0.45 : 1 }}>
+    <div className="rounded-xl border p-3 transition-opacity" style={{ borderColor: c, background: a.level === "CRITICAL" ? "var(--crit-bg)" : "var(--warn-bg)", opacity: a.acknowledged ? 0.45 : 1 }}>
       <div className="flex flex-col sm:flex-row gap-3">
         {a.has_image && <AlertImage id={a.id} cache={cache} />}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Pill color={c} solid>{a.level}</Pill>
             <span className="font-semibold">{humanize(a.rule)}</span>
-            {a.acknowledged && <Pill color="#34d399">ACKNOWLEDGED</Pill>}
+            {a.acknowledged && <Pill color="var(--ok)">ACKNOWLEDGED</Pill>}
             <span className="mono text-[10px] ml-auto" style={{ color: "var(--muted)" }}>{relTime(a.created_at, now)}</span>
           </div>
           <p className="text-sm mt-1.5">{a.reason}</p>
@@ -78,7 +78,7 @@ export function AlertFeed({ alerts, loading, error, reload }: { alerts: Alert[] 
   };
   const open = alerts?.filter((a) => !a.acknowledged).length ?? 0;
   return (
-    <Panel kicker="LIVE ALERT FEED" title="Alerts" right={<span className="mono text-[11px] flex items-center gap-1.5" style={{ color: open ? "#f87171" : "var(--muted)" }}><ShieldAlert size={13} />{open} open</span>}>
+    <Panel kicker="LIVE ALERT FEED" title="Alerts" right={<span className="mono text-[11px] flex items-center gap-1.5" style={{ color: open ? "var(--bad)" : "var(--muted)" }}><ShieldAlert size={13} />{open} open</span>}>
       <ErrorLine msg={error} />
       <ErrorLine msg={ackErr} />
       {loading && !alerts && <Empty>Loading alerts...</Empty>}

@@ -33,14 +33,14 @@ function CameraTile({ tenantId, cam, now }: { tenantId: string; cam: CameraInfo;
   const age = cam.updated_at ? now - new Date(cam.updated_at).getTime() : Infinity;
   const stale = age > STALE_AFTER_MS;
   return (
-    <figure className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--line)", background: "#05080f" }}>
+    <figure className="rounded-lg border overflow-hidden" style={{ borderColor: "var(--line)", background: "var(--field)" }}>
       <div className="aspect-[4/3] grid place-items-center">
         {url && !failed ? <img src={url} alt={`Camera ${cam.camera_id}`} className="w-full h-full object-cover" />
           : <ImageOff size={22} style={{ color: "var(--muted)" }} />}
       </div>
       <figcaption className="flex items-center justify-between px-2 py-1.5 mono text-[11px]">
         <span className="flex items-center gap-1.5"><Camera size={12} />{cam.camera_id}</span>
-        <span style={{ color: stale ? "#f59e0b" : "var(--muted)" }}>{cam.updated_at ? relTime(cam.updated_at, now) : "-"}{stale ? " · stale" : ""}</span>
+        <span style={{ color: stale ? "var(--warn)" : "var(--muted)" }}>{cam.updated_at ? relTime(cam.updated_at, now) : "-"}{stale ? " · stale" : ""}</span>
       </figcaption>
     </figure>
   );

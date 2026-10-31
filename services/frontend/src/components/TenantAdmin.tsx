@@ -44,7 +44,7 @@ export function TenantAdmin({ tenantId }: TenantAdminProps) {
 
       <div className="space-y-6">
         <div>
-          <h4 className="mono text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "#fbbf24" }}>
+          <h4 className="mono text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "var(--warn)" }}>
             <Shield size={14} /> ALERT THRESHOLDS
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -82,7 +82,7 @@ export function TenantAdmin({ tenantId }: TenantAdminProps) {
         </div>
 
         <div>
-          <h4 className="mono text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "#34d399" }}>
+          <h4 className="mono text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: "var(--ok)" }}>
             <Bell size={14} /> NOTIFICATION CHANNELS
           </h4>
           <div className="space-y-2 text-xs">

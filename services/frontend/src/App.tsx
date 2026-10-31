@@ -20,18 +20,10 @@ function TokenPrompt({ onDone }: { onDone: () => void }) {
   };
   return (
     <form onSubmit={submit} className="flex items-center gap-2">
-      <KeyRound size={14} style={{ color: "#fbbf24" }} />
-      <input
-        type="password"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        placeholder="Admin token required"
-        className="rounded-lg px-2 py-1 text-[12px] border outline-none w-40 sm:w-52"
-        style={{ ...inputStyle, borderColor: "#fbbf24" }}
-      />
-      <button className="mono text-[11px] px-3 py-1 rounded-lg" style={btnPrimary}>
-        SAVE
-      </button>
+      <KeyRound size={14} style={{ color: "var(--warn)" }} />
+      <input type="password" value={val} onChange={(e) => setVal(e.target.value)} placeholder="Admin token required"
+        className="rounded-lg px-2 py-1 text-[12px] border outline-none w-40 sm:w-52" style={{ ...inputStyle, borderColor: "var(--warn)" }} />
+      <button className="mono text-[11px] px-3 py-1 rounded-lg" style={btnPrimary}>SAVE</button>
     </form>
   );
 }
@@ -39,16 +31,16 @@ function TokenPrompt({ onDone }: { onDone: () => void }) {
 function HealthPill() {
   const h = usePoll(api.health, 10000);
   const d = h.data;
-  if (!d) return <Pill color={h.error ? "#f87171" : "#8ea3c2"}>{h.error ? "OFFLINE" : "..."}</Pill>;
+  if (!d) return <Pill color={h.error ? "var(--bad)" : "var(--muted)"}>{h.error ? "OFFLINE" : "..."}</Pill>;
   const ok = d.status === "ok";
   const bad = (["redis", "postgres", "neo4j"] as const).filter((k) => !d[k]);
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       <span title={bad.length ? `down: ${bad.join(", ")}` : "all services up"}>
-        <Pill color={ok ? "#4ade80" : "#fbbf24"}>{ok ? "OK" : "DEGRADED"}</Pill>
+        <Pill color={ok ? "var(--ok)" : "var(--warn)"}>{ok ? "OK" : "DEGRADED"}</Pill>
       </span>
-      {d.mock_mode && <Pill color="#a78bfa">MOCK MODE</Pill>}
-      {d.low_cost_mode && <Pill color="#22d3ee">LOW COST</Pill>}
+      {d.mock_mode && <Pill color="var(--accent2)">MOCK MODE</Pill>}
+      {d.low_cost_mode && <Pill color="var(--accent)">LOW COST</Pill>}
     </div>
   );
 }
@@ -75,18 +67,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen overflow-x-clip" style={{ background: "var(--bg)" }}>
-      <header
-        className="sticky top-0 z-40 backdrop-blur border-b"
-        style={{ background: "rgba(7,11,18,0.92)", borderColor: "var(--line)" }}
-      >
+      <header className="sticky top-0 z-40 backdrop-blur border-b" style={{ background: "var(--header)", borderColor: "var(--line)" }}>
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2">
           <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-lg grid place-items-center font-bold"
-              style={{ background: "var(--accent)", color: "#04121a" }}
-            >
-              <Eye size={20} />
-            </div>
+            <div className="w-9 h-9 rounded-lg grid place-items-center font-bold" style={{ background: "var(--accent)", color: "var(--on-accent)" }}><Eye size={20} /></div>
             <div>
               <p className="font-bold leading-none">DRISHTI CLOUD</p>
               <p className="mono text-[10px] tracking-widest hidden sm:block" style={{ color: "var(--muted)" }}>

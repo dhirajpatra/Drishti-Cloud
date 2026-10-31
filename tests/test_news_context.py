@@ -177,7 +177,7 @@ def test_published_after_rejected_falls_back(monkeypatch):
         return httpx.Response(200, request=req, json={"data": [row("Chennai flood alert")]})
 
     monkeypatch.setattr(nc.httpx, "get", api)
-    assert nc.fetch_local("Chennai", national=lambda: [])[0]["headline"] == "Chennai flood alert"
+    assert nc.fetch_local("Chennai", scan=lambda: [])[0]["headline"] == "Chennai flood alert"
     assert nc._published_after_ok is False
 
 
