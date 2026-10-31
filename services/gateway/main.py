@@ -18,7 +18,7 @@ from datetime import date
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from drishti import bus, db, graph
@@ -167,6 +167,57 @@ def dhash(img: Image.Image, size: int = 16) -> int:
     return bits
 
 
+def image_quality(img: Image.Image) -> dict:
+    """Cheap local look at the frame, like a guard noticing 'the picture went black / blurry': brightness, contrast, sharpness."""
+    g = img.convert("L").resize((160, 120))
+    st = ImageStat.Stat(g)
+    sharp = ImageStat.Stat(g.filter(ImageFilter.FIND_EDGES)).var[0]
+    return {"brightness": round(st.mean[0], 1), "contrast": round(st.stddev[0], 1), "sharpness": round(sharp, 1)}
+
+
+def is_blocked(q: dict) -> str | None:
+    """Why the view looks lost (covered lens, blacked out, white-out), else None. A normal dim room still has texture/noise."""
+    if q["contrast"] < 2.0:
+        return "picture is a flat colour"
+    if q["brightness"] < 8 and q["contrast"] < 6:
+        return "picture is black"
+    return None
+
+
+def brighten(img: Image.Image) -> Image.Image:
+    """Deterministic low-light help (contrast stretch + gamma), never generative: it cannot invent people or objects."""
+    out = ImageOps.autocontrast(img, cutoff=1)
+    return out.point([int(255 * ((v / 255) ** 0.6)) for v in range(256)] * 3)
+
+
+PANEL = (320, 240)
+
+
+def make_storyboard(panels: list[tuple[Image.Image, str]]) -> bytes:
+    """Contact sheet, oldest panel first (left to right, top to bottom), each labelled with its time. One image = one model
+    call, yet the model can see movement: standing -> lying (fall), arm raised -> contact (hit), someone entering."""
+    from PIL import ImageDraw
+    n = len(panels)
+    cols = 1 if n == 1 else 2
+    rows = (n + cols - 1) // cols
+    sheet = Image.new("RGB", (PANEL[0] * cols, PANEL[1] * rows), (0, 0, 0))
+    for i, (im, label) in enumerate(panels):
+        tile = im.copy()
+        tile.thumbnail(PANEL)
+        x, y = (i % cols) * PANEL[0], (i // cols) * PANEL[1]
+        sheet.paste(tile, (x + (PANEL[0] - tile.width) // 2, y + (PANEL[1] - tile.height) // 2))
+        d = ImageDraw.Draw(sheet)
+        d.rectangle([x, y, x + 8 + 7 * len(label), y + 16], fill=(0, 0, 0))
+        d.text((x + 4, y + 2), label, fill=(255, 255, 255))
+    out = io.BytesIO()
+    sheet.save(out, "JPEG", quality=80)
+    return out.getvalue()
+
+
+def ago(sec: float) -> str:
+    return f"{int(sec)}s ago" if sec < 90 else f"{int(sec // 60)} min ago"
+
+
 GRID = (32, 24)
 
 
@@ -190,6 +241,7 @@ def ingest(
     sensors: str = Form("{}"),
     camera_id: str = Form("cam_1"),
     force: bool = Form(False),
+    burst: list[UploadFile] = File(default=[]),     # earlier frames of the last few seconds, oldest first (motion hook)
 ):
     t = require_tenant(tenant_id, request)
     r = bus.redis_client()
@@ -217,12 +269,31 @@ def ingest(
     except (UnidentifiedImageError, OSError):
         raise HTTPException(415, "not a valid image") from None
     img = img.convert("RGB")
+    hires = img.copy()
+    hires.thumbnail((1280, 960))
     img.thumbnail((640, 480))
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=80)
     jpeg = buf.getvalue()
 
-    bus.put_latest(tenant_id, camera_id, jpeg)   # dashboard live view, independent of dedupe / analysis
+    bus.put_latest(tenant_id, camera_id, jpeg)   # dashboard live view (the true picture), independent of dedupe / analysis
+
+    quality = image_quality(img)
+    blocked = is_blocked(quality)
+    skey = f"camstate:{tenant_id}:{camera_id}"
+    was_blocked = r.get(skey) == "blocked"
+    r.set(skey, "blocked" if blocked else "ok", ex=7 * 86400)
+    just_blocked = bool(blocked) and not was_blocked                      # alert once when the view is lost, not every frame
+    if was_blocked and not blocked:
+        bus.notify(tenant_id, "camera", "INFO", f"Camera {camera_id} view is back", "The picture is normal again.", r=r)
+    quality["obstructed"], quality["why"] = just_blocked, blocked
+    model_img = img
+    if not blocked and quality["brightness"] < 55:                        # dim scene: brighten what the models see
+        model_img = brighten(img)
+        quality["enhanced"] = True
+        b2 = io.BytesIO()
+        model_img.save(b2, "JPEG", quality=80)
+        jpeg = b2.getvalue()
 
     # --- LOW_COST_MODE: idle scene -> reuse cached analysis, no model call
     h = dhash(img)
@@ -232,7 +303,7 @@ def ingest(
     now = time.time()
     pir = sensor_data.get("pir")
     static, change = False, None
-    if prev and not force and settings.low_cost_mode and pir is not True:
+    if prev and not force and settings.low_cost_mode and pir is not True and not just_blocked:
         age = now - float(prev["analyzed_ts"])
         if prev.get("sig"):
             change = change_fraction(sig, json.loads(prev["sig"]), settings.cell_delta)
@@ -241,17 +312,51 @@ def ingest(
             changed = bin(h ^ int(prev["hash"])).count("1") > settings.hash_distance
         # idle while nothing moved; also hold a changed scene back until the minimum gap since the last analysis has passed
         # (the baseline stays put, so the change is picked up by the first sample after the gap)
-        burst = change is not None and change >= settings.burst_fraction and age >= settings.burst_gap_sec   # fight / fall / panic
-        static = age < settings.force_refresh_sec and (not changed or (age < settings.min_analysis_gap_sec and not burst))
+        big_jump = change is not None and change >= settings.burst_fraction and age >= settings.burst_gap_sec   # fight / fall / panic
+        static = age < settings.force_refresh_sec and (not changed or (age < settings.min_analysis_gap_sec and not big_jump))
     if not static:
         r.hset(hkey, mapping={"hash": str(h), "sig": json.dumps(sig), "analyzed_ts": str(now)})
         r.expire(hkey, 7 * 86400)
 
     frame_id = bus.new_id()
+    story_note = None
+    if not static:
+        if hires.width > img.width:                                      # camera sends more pixels than the 640x480 the models get
+            hb = io.BytesIO()
+            hires.save(hb, "JPEG", quality=85)
+            bus.put_hires(frame_id, hb.getvalue())
+        panels: list[tuple[Image.Image, str]] = []
+        if settings.storyboard:
+            before, age = bus.get_baseline(tenant_id, camera_id)
+            if before is not None and age is not None:
+                panels.append((Image.open(io.BytesIO(before)), f"BEFORE {ago(age)}"))
+            extra = []
+            for f in burst[:8]:
+                try:
+                    im = Image.open(io.BytesIO(f.file.read(settings.max_upload_mb * 1024 * 1024))).convert("RGB")
+                    im.thumbnail(PANEL)
+                    extra.append(im)
+                except (UnidentifiedImageError, OSError):
+                    continue
+            keep = extra if len(extra) <= 2 else [extra[0], extra[len(extra) // 2]]   # max 4 panels in the sheet
+            for k, im in enumerate(keep):
+                panels.append((im, f"t-{(len(keep) - k) * settings.burst_spacing_sec * (len(extra) / max(1, len(keep))):.0f}s"))
+            if panels:
+                panels.append((model_img, "NOW"))
+                bus.put_story(frame_id, make_storyboard(panels))
+                story_note = ("the image is a storyboard of the same camera, oldest panel first (left to right, top to bottom); "
+                              "judge movement across panels (falling, hitting, entering, leaving) and decide about the NOW panel")
+        small = model_img.copy()
+        small.thumbnail(PANEL)
+        sb = io.BytesIO()
+        small.save(sb, "JPEG", quality=70)
+        bus.put_baseline(tenant_id, camera_id, sb.getvalue())
     bus.put_frame(frame_id, jpeg)
     bus.publish("raw_frames", tenant_id, {
         "frame_id": frame_id, "tenant_id": tenant_id, "vertical": t["vertical"], "camera_id": camera_id,
         "ts": bus.utcnow_iso(), "sensors": sensor_data, "static": static, "scene_hash": f"{h:064x}",
+        "quality": {k: v for k, v in quality.items() if v not in (None, False)},
+        **({"storyboard": story_note} if story_note else {}),
     }, r)
     return {"status": "queued", "frame_id": frame_id, "static": static,
             "change": None if change is None else round(change, 3)}

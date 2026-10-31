@@ -250,3 +250,32 @@ def test_motion_hook_refuses_to_run_open_when_auth_is_required(client, redis_c, 
     monkeypatch.setattr(settings, "auth_required", False)
     redis_c.flushdb()
     assert client.get("/hook/motion/home_1_bangalore/kitchen").json() == {"status": "triggered"}   # local default: no token needed
+
+
+# --------------------------------------------------------------------------- storyboard (before / burst / now)
+def test_burst_frames_and_baseline_become_a_storyboard(client, redis_c):
+    from drishti import bus
+    redis_c.flushdb()
+    post = lambda files, **kw: client.post("/ingest/mall_1", files=files, data={"camera_id": "door", **kw}).json()
+    first = post([("file", ("f.jpg", _scene(), "image/jpeg"))])
+    assert bus.get_story(first["frame_id"]) is None                            # nothing to compare with yet: no storyboard
+    files = [("file", ("f.jpg", _scene(blob=(80, 60, 200, 200)), "image/jpeg"))] + [
+        ("burst", (f"b{i}.jpg", _scene(blob=(20 * i, 60, 120 + 20 * i, 200)), "image/jpeg")) for i in range(3)]
+    second = post(files, force="true")
+    sheet = Image.open(io.BytesIO(bus.get_story(second["frame_id"])))
+    assert sheet.size == (640, 480)                                            # BEFORE + 2 burst panels + NOW = 2x2
+    plain = post([("file", ("f.jpg", _scene(blob=(150, 100, 250, 220)), "image/jpeg"))], force="true")
+    assert Image.open(io.BytesIO(bus.get_story(plain["frame_id"]))).size == (640, 240)   # BEFORE + NOW = 2x1
+
+
+def test_storyboard_can_be_switched_off_and_bad_burst_frames_are_ignored(client, redis_c, monkeypatch):
+    from drishti import bus
+    from drishti.config import settings
+    redis_c.flushdb()
+    client.post("/ingest/mall_1", files={"file": ("f.jpg", _scene(), "image/jpeg")}, data={"camera_id": "a"})
+    r = client.post("/ingest/mall_1", data={"camera_id": "a", "force": "true"},
+                    files=[("file", ("f.jpg", _scene(blob=(80, 60, 200, 200)), "image/jpeg")), ("burst", ("x.jpg", b"junk", "image/jpeg"))])
+    assert r.status_code == 200 and bus.get_story(r.json()["frame_id"]) is not None     # junk burst frame skipped, BEFORE + NOW kept
+    monkeypatch.setattr(settings, "storyboard", False)
+    r = client.post("/ingest/mall_1", data={"camera_id": "a", "force": "true"}, files={"file": ("f.jpg", _scene(brightness=40), "image/jpeg")})
+    assert bus.get_story(r.json()["frame_id"]) is None

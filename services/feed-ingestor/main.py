@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stimeout;8000000")
@@ -85,16 +86,35 @@ def grab(feed: dict) -> bytes | None:
         cap.release()
 
 
-def push(feed: dict, sensors: dict | None = None) -> None:
+def grab_burst(feed: dict, n: int, spacing: float) -> list[bytes]:
+    """n frames `spacing` seconds apart, oldest first (a guard watches for a few seconds before judging)."""
+    frames: list[bytes] = []
+    for i in range(n):
+        if i:
+            time.sleep(spacing)
+        try:
+            f = grab(feed)
+        except Exception:  # noqa: BLE001 - a missed frame must not lose the ones we have
+            f = None
+        if f:
+            frames.append(f)
+    return frames
+
+
+def push(feed: dict, sensors: dict | None = None, burst: int = 1) -> None:
     key = f"{feed['tenant']}/{feed['camera']}"
     try:
-        jpeg = grab(feed)
+        if burst > 1:
+            frames = grab_burst(feed, burst, settings.burst_spacing_sec)
+            jpeg, earlier = (frames[-1], frames[:-1]) if frames else (None, [])
+        else:
+            jpeg, earlier = grab(feed), []
         if jpeg is None:
             return
         resp = httpx.post(
             f"{settings.gateway_url}/ingest/{feed['tenant']}", timeout=30,
             headers={"X-Admin-Token": TOKEN} if TOKEN else {},
-            files={"file": ("frame.jpg", jpeg, "image/jpeg")},
+            files=[("file", ("frame.jpg", jpeg, "image/jpeg"))] + [("burst", (f"b{i}.jpg", b, "image/jpeg")) for i, b in enumerate(earlier)],
             data={"camera_id": feed["camera"], "sensors": json.dumps(sensors or {"source": "rtsp"})},
         )
         if resp.status_code == 200:
@@ -124,7 +144,7 @@ def handle_trigger(raw: str, env_feeds: list[dict]) -> bool:
         log.warning("motion hook for %s/%s but no such feed (camera id must match RTSP_FEEDS / the Camera sources panel)", t["tenant"], t["camera"])
         return False
     log.info("%s/%s motion hook -> analysing now", t["tenant"], t["camera"])
-    push(feed, {"source": "motioneye_hook", "pir": True})
+    push(feed, {"source": "motioneye_hook", "pir": True}, burst=settings.burst_frames)
     return True
 
 

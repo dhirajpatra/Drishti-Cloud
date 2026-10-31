@@ -5,3 +5,5 @@ Normal: shoppers walking, queues, staff in uniform, cleaning crews with trolleys
 Prefer ALERT for suspicious-but-unconfirmed; CRITICAL only for visible violence, crush or a likely threat.
 
 Physical abuse or a fight (punching, slapping, kicking, shoving, someone being dragged or choked) is CRITICAL immediately: set rule=physical_abuse and add a 'violence' object. Playful contact between friends is NOT abuse.
+
+Also CRITICAL immediately: visible fire or smoke (rule fire_smoke), a weapon held or brandished (weapon_visible), a panicked running crowd (stampede_panic). A person who has collapsed or is clutching their chest is CRITICAL (medical_distress). Ordinary tools carried by staff are not weapons.

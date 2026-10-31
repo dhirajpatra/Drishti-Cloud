@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from datetime import datetime
 
 import httpx
 
@@ -138,6 +139,41 @@ def handle(p: dict, r) -> None:
             log.exception("graph write failed (event kept in Postgres)")
 
 
+def camera_watchdog_once(r, now: float | None = None) -> int:
+    """A guard notices when a CCTV screen goes dead. Cameras that sent nothing for CAMERA_OFFLINE_SEC raise ONE notification
+    until they report again (then one 'back' notice). Returns the number of notifications raised."""
+    now = now or time.time()
+    raised = 0
+    for t in db.all_tenants():
+        for cam in bus.list_cameras(t["id"]):
+            if not cam.get("updated_at"):
+                continue
+            age = now - datetime.fromisoformat(cam["updated_at"]).timestamp()
+            flag = f"camoffline:{t['id']}:{cam['camera_id']}"
+            if age > settings.camera_offline_sec:
+                if r.set(flag, 1, nx=True, ex=7 * 86400):
+                    bus.notify(t["id"], "camera", "WARNING", f"Camera {cam['camera_id']} is silent for {int(age // 60)} min",
+                               "No frame received: camera off, network down or the feed-ingestor cannot reach it.", r=r)
+                    raised += 1
+            elif r.delete(flag):
+                bus.notify(t["id"], "camera", "INFO", f"Camera {cam['camera_id']} is back online", "Frames are arriving again.", r=r)
+                raised += 1
+    return raised
+
+
+def watchdog_loop() -> None:
+    r = bus.redis_client()
+    while not bus.stopping():
+        try:
+            camera_watchdog_once(r)
+        except Exception:  # noqa: BLE001
+            log.exception("camera watchdog failed")
+        for _ in range(6):
+            if bus.stopping():
+                return
+            time.sleep(10)
+
+
 def retention_loop() -> None:
     while not bus.stopping():
         try:
@@ -153,4 +189,5 @@ def retention_loop() -> None:
 
 if __name__ == "__main__":
     threading.Thread(target=retention_loop, daemon=True).start()
+    threading.Thread(target=watchdog_loop, daemon=True, name="camera-watchdog").start()
     bus.consume("proofed", "action-agent", handle)

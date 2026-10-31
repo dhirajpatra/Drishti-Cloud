@@ -33,6 +33,9 @@ SYNONYMS = {
     "fight": "violence", "fighting": "violence", "hitting": "violence", "punching": "violence", "slapping": "violence",
     "kicking": "violence", "assault": "violence", "beating": "violence", "abuse": "violence", "physical_abuse": "violence",
     "physical_violence": "violence", "person_hitting": "violence", "choking": "violence",
+    "flame": "fire", "flames": "fire", "burning": "fire", "blaze": "fire", "fire_smoke": "fire", "smoking": "smoke",
+    "gun": "weapon", "pistol": "weapon", "firearm": "weapon", "rifle": "weapon", "handgun": "weapon", "weapon_visible": "weapon",
+    "machete": "weapon", "sword": "weapon",
 }
 
 ABUSE_SPEAK = {
@@ -113,6 +116,18 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int) -> list[dict
     if "violence" in labels or ABUSE_RE.search(audio) or any(ABUSE_RE.search(t) for t in texts):
         out.append(_hit("physical_abuse", "CRITICAL", f"Possible physical abuse or fight in {cam}", ["violence"],
                         ABUSE_SPEAK.get(vertical, "Stop immediately. Help is being called.")))
+
+    # ---- universal hazards, every vertical: fire / smoke, weapon, camera blocked
+    if "fire" in labels or "smoke" in labels:
+        out.append(_hit("fire_smoke", "CRITICAL", f"Fire or smoke visible in {cam}", [x for x in ("fire", "smoke") if x in labels],
+                        "Fire or smoke detected. Please leave the area. Emergency services are being alerted."))
+    if "weapon" in labels:
+        out.append(_hit("weapon_visible", "CRITICAL", f"A weapon is visible in {cam}", ["weapon"],
+                        "A weapon has been detected. Security has been alerted."))
+    q = p.get("quality") or {}
+    if q.get("obstructed"):
+        out.append(_hit("camera_obstructed", "ALERT", f"Camera {cam} looks blocked, covered or blacked out ({q.get('why', 'view lost')})", [],
+                        "The camera view is blocked. Please check the camera."))
 
     if vertical == "mall_security":
         crowd = persons

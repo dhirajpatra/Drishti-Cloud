@@ -8,7 +8,7 @@ scene, remembers what is normal for *this* home, school, mall or ICU, and speaks
 ![Meta Model API](https://img.shields.io/badge/Meta-Model%20API-0467DF) ![Muse Spark](https://img.shields.io/badge/Muse%20Spark-vision%20%2B%20decisions-0467DF)
 ![Muse Wonder](https://img.shields.io/badge/Muse%20Wonder-reasoning-8A3FFC) ![SAM 3.1](https://img.shields.io/badge/SAM%203.1-segmentation-2EA043)
 ![Baseten](https://img.shields.io/badge/Baseten-Muse%20Spark%20Open-111) ![WhatsApp](https://img.shields.io/badge/WhatsApp-Cloud%20API-25D366)
-![Neo4j](https://img.shields.io/badge/Neo4j-habit%20graph-018BFF) ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED) ![tests](https://img.shields.io/badge/tests-91%20passing-2EA043)
+![Neo4j](https://img.shields.io/badge/Neo4j-habit%20graph-018BFF) ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED) ![tests](https://img.shields.io/badge/tests-104%20passing-2EA043)
 
 ![Drishti dashboard](./docs/images/drishti-dashboard1.png)
 
@@ -23,7 +23,7 @@ scene, remembers what is normal for *this* home, school, mall or ICU, and speaks
 | **What is different** | (1) **Six cooperating agents** on a Redis bus, not one prompt. (2) **A per-site memory** (Neo4j habit graph) so "Dad naps at 3 pm" is not an alarm. (3) **World context**: local news can raise an alert's severity. (4) **Cost discipline**: the model is called only when the picture meaningfully changes, so it runs on a hobby budget. |
 | **Meta technology used** | Muse Spark (vision + decisions), Muse Wonder (reasoning over memory and news), SAM 3.1 (segmentation), Meta Responses API, **Muse Spark Open on Baseten** (hackathon credits, with automatic fallback), **WhatsApp Business Cloud API** (alerts), built and extended with **Muse Code** (`SKILL.md`). |
 | **Runs how** | `docker compose up -d` on a laptop today, the same file on any cloud later. **No API key needed to try it**: it starts in an offline `MOCK_MODE` with a built-in simulator. |
-| **Verified** | 91 automated tests (whole six-agent pipeline end to end, in mock mode, plus gateway, cost-control, news, Baseten routing, WhatsApp, motion hook). Also running against a real motionEye camera, Meta Responses API, Neo4j and freenewsapi.io. |
+| **Verified** | 104 automated tests (whole six-agent pipeline end to end, in mock mode, plus gateway, cost-control, news, Baseten routing, WhatsApp, motion hook). Also running against a real motionEye camera, Meta Responses API, Neo4j and freenewsapi.io. |
 
 ### Try it in two minutes (no keys, no camera)
 ```bash
@@ -61,6 +61,19 @@ monitor alarm (ICU), each with an annotated proof picture and the spoken line th
 - **Dashboard notification centre**: local-news hazards (flood, power cut, bomb threat, stampede...) and every confirmed alert, unread counts,
   tab-title badge.
 - **Annotated proof image** on every alert, kept for review. It is drawn locally (boxes and labels), so it costs no model call.
+
+### Sees like a careful human, not like a still-photo classifier
+A guard does not judge one frozen picture. Drishti copies what a guard actually does:
+
+| A human guard... | Drishti |
+|---|---|
+| **Watches for a few seconds** before judging a fall or a hit | On a motion-hook event the ingestor grabs a short burst; Spark receives a **storyboard** (BEFORE / earlier moments / NOW, labelled, in one image) and judges *movement*: standing to lying, a raised arm then contact, someone entering. |
+| Compares **before and now** | Every analysed frame is shown next to the last analysed picture of that camera. |
+| **Leans in** to read a monitor or sign | OCR reads **crops of the monitor / sign from a hi-res copy** (up to 1280x960), not a 640x480 blur. |
+| Notices the **picture itself** is bad | Local quality check: **camera covered / blacked out** raises one `camera_obstructed` alert (and a "view is back" notice); a **silent camera** raises a notification after `CAMERA_OFFLINE_SEC`. |
+| Is careful in the **dark** | Dim scenes are brightened with a deterministic contrast/gamma step (never a generative model, which could invent people) and Spark is told the picture is unreliable, so it prefers ALERT over CRITICAL unless clear. |
+| Knows the **universal emergencies** | Fire / smoke, a weapon, physical abuse, a person collapsed or convulsing are handled in **every** vertical, plus vertical-specific ones (patient pulling lines, fence climbing, stampede...). |
+| Keeps calm and **escalates in two steps** | Fast rules and Spark first; Muse Wonder adds habits and local news before confirming, suppressing or escalating. |
 
 ### Costs almost nothing to run (the hackathon-grade engineering)
 | Mechanism | What it does |
@@ -127,10 +140,10 @@ The model providers behind `SAM`, `OCR`, `Spark` and `Wonder`: **Meta Responses 
 
 | Vertical | What it catches | Typical response |
 |---|---|---|
-| **Home - seniors** | Fall, **physical abuse**, no motion 2 h, door open at night, stove on and nobody there, spoken "help / bachao" | Calm spoken line, OLED, loud module, WhatsApp to family |
-| **Mall** | **Physical abuse / fight**, unattended bag > 2 min, crowd > 50, restricted area, panic | Speaker, WhatsApp to security |
-| **School - children** | **Physical abuse**, stranger without badge (CRITICAL near children), child alone in corridor, gate open in class time, bullying cluster | Admin notification, speaker, WhatsApp |
-| **ICU / hospital** | **Physical abuse**, patient on floor, out of bed, monitor ALARM or abnormal vitals (OCR of HR / SpO2), no staff at bedside for 1 h | Nurse station + image proof |
+| **Home - seniors** | Fall, **physical abuse**, medical distress (clutching chest, convulsing), fire / smoke, weapon, no motion 2 h, door open at night, stove on and nobody there, spoken "help / bachao" | Calm spoken line, OLED, loud module, WhatsApp to family |
+| **Mall** | **Physical abuse / fight**, weapon, fire / smoke, stampede or panic, medical distress, unattended bag > 2 min, crowd > 50, restricted area | Speaker, WhatsApp to security |
+| **School - children** | **Physical abuse**, weapon, fire / smoke, fence climbing, child leaving unescorted, stranger without badge (CRITICAL near children), child alone in corridor, gate open in class time, bullying cluster | Admin notification, speaker, WhatsApp |
+| **ICU / hospital** | **Physical abuse**, patient pulling lines, seizure, patient on floor, out of bed, monitor ALARM or abnormal vitals (zoomed OCR of HR / SpO2), fire / smoke, no staff at bedside for 1 h | Nurse station + image proof |
 
 Each vertical is a SOP document + a prompt file (`services/spark-multimodal/prompts/<vertical>.txt`) + a rule set. Adding a vertical is a data change, not a rewrite.
 
@@ -143,6 +156,7 @@ Each vertical is a SOP document + a prompt file (`services/spark-multimodal/prom
 | Segmentation | `sam-3.1` (Meta) | Auto-fallback to the Spark vision model for an hour if it returns no usable text (`SAM_MODE`). |
 | Vision decision | `muse-spark-1.3` (Meta) | Or `baseten:meta-models/muse-spark-open-1026` first, Meta second. |
 | Reasoning | `muse-wonder-1.0` (Meta) | Runs only for ALERTs; never lowers a CRITICAL. |
+| Muse Image | not in the detection path | It **generates / edits** pictures (it does not analyse or segment them), and a generator can invent people or objects, so it is deliberately *not* used to "enhance" evidence. A good future use is a privacy-preserving illustrated alert card for WhatsApp. `scripts/probe_muse_image.py` shows what it returns on your key. |
 | OCR | `muse-spark-1.3` or Baseten | |
 
 `MODEL=a|b|c` tries each in order; missing key, exhausted daily budget, HTTP error or empty answer moves to the next. Baseten usage is counted
@@ -200,7 +214,7 @@ curl -X POST http://localhost:8000/ingest/mall_1 -F "file=@photo.jpg" -F "camera
 ### 6. Tests (no Docker, no key, no Neo4j needed)
 ```bash
 pip install ./services/common fastapi "uvicorn[standard]" python-multipart pytest
-make test      # throw-away redis + postgres, whole pipeline in MOCK_MODE: 91 tests
+make test      # throw-away redis + postgres, whole pipeline in MOCK_MODE: 104 tests
 make smoke     # against a running stack: one hazard per vertical must raise the right alert
 ```
 
@@ -224,6 +238,14 @@ Deep dives: **[Neo4j queries](./docs/NEO4J.md)** · **[Operations, cloud move, c
 `GET /tenants/{id}/notifications` · `POST /tenants/{id}/notifications/read` · `GET /alerts/{id}/image` · `POST /alerts/{id}/ack` ·
 `GET /verticals/{v}/stats` · `GET /usage` · `GET /health` · `GET /edge/{tenant}/actuate` (Pi polls for speak / OLED commands).
 Interactive docs at `/docs`.
+
+---
+
+## How close is this to "human intelligence"? An honest answer
+It is a vigilant assistant, not a human replacement. It is strong at *noticing and escalating fast* (24 x 7, never tired, consistent), and it now reasons over
+sequences, context, memory and picture quality. It is still limited by what a camera at a sampled moment shows: no audio understanding yet, no identity, no
+long video, and a vision model can be wrong. That is why every alert carries its reason and a proof picture, why *False alarm* teaches the system, and why a
+person always confirms a life-critical situation.
 
 ---
 
@@ -268,7 +290,7 @@ python pi_edge.py --tenant_id home_1_bangalore --vertical home_seniors --gateway
 - [x] Docker Compose multi-agent system, Neo4j graph memory, Postgres RLS, Redis streams
 - [x] Multi-tenant, multi-modal (images, video/sensors, text, docs), multi-vertical (home, mall, school, ICU)
 - [x] Real camera, real news, real model calls; **and** a full offline mode for anyone to try it
-- [x] 91 automated tests
+- [x] 104 automated tests
 
 ## Author and license
 **Dhiraj Patra**, Bangalore, India · MIT. Built for learning and community safety.

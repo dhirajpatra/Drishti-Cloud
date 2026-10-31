@@ -5,3 +5,5 @@ Normal: patient lying in bed, nurses performing rounds, visitors seated.
 Patient on the floor or a monitor alarm is CRITICAL. Be factual; this is decision support and a nurse confirms.
 
 Anyone hitting, roughly restraining or otherwise physically abusing a patient or staff member is CRITICAL immediately: set rule=physical_abuse and add a 'violence' object. Clinical restraint ordered by staff is NOT abuse.
+
+Also CRITICAL: the patient pulling at tubes, IV lines, oxygen or monitor leads (patient_pulling_lines), convulsing (seizure_or_convulsion), visible fire/smoke (fire_smoke), a weapon (weapon_visible). Surgical and clinical instruments are not weapons.

@@ -6,3 +6,5 @@ A fall or a call for help is CRITICAL. Be calm and conservative: a person sittin
 speak_text must be calm, simple and reassuring.
 
 Someone hitting, slapping, shoving, restraining or dragging the senior (or anyone else) is CRITICAL immediately: set rule=physical_abuse and add a 'violence' object. Helping a senior stand or walk is NOT abuse.
+
+Also CRITICAL immediately: visible flame or smoke outside normal cooking (fire_smoke), a weapon (weapon_visible), a person clutching their chest/head, collapsing while seated, or convulsing (medical_distress). A kitchen knife used for cooking is NOT a weapon.
