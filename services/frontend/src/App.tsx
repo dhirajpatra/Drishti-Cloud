@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Eye, KeyRound } from "lucide-react";
+import { Eye, KeyRound, Moon, Sun } from "lucide-react";
 import { api, getToken, onUnauthorized, setToken } from "./api";
 import { usePoll } from "./lib";
 import Dashboard from "./pages/Dashboard";
@@ -45,7 +45,18 @@ function HealthPill() {
   );
 }
 
+type Theme = "light" | "dark";
+const initialTheme = (): Theme => {
+  try { return localStorage.getItem("drishti_theme") === "dark" ? "dark" : "light"; } catch { return "light"; }
+};
+
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#0B0F17" : "#F4F6FA");
+    try { localStorage.setItem("drishti_theme", theme); } catch { /* private window: keep it for this visit only */ }
+  }, [theme]);
   const [tab, setTab] = useState<Tab>(tabFromHash);
   const [needToken, setNeedToken] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState<string>("home_1_bangalore");
@@ -86,6 +97,10 @@ export default function App() {
           </nav>
           <div className="flex items-center gap-3 flex-wrap ml-auto">
             {needToken && <TokenPrompt onDone={() => setNeedToken(false)} />}
+            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              title={theme === "dark" ? "Light theme" : "Dark theme"} className="p-2 rounded-lg border" style={{ borderColor: "var(--line)", color: "var(--muted)" }}>
+              {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
             <HealthPill />
           </div>
         </div>
