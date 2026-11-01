@@ -99,7 +99,7 @@ export default function Dashboard() {
             </div>
             <div className="grid xl:grid-cols-2 gap-4">
               <TestFrame key={tenant.id} tenantId={tenant.id} vertical={tenant.vertical} />
-              <KnowledgeGraph graph={graph.data} loading={graph.loading} error={graph.error} />
+              <KnowledgeGraph graph={graph.data} loading={graph.loading} error={graph.error} tenantId={tenant.id} />
             </div>
           </>
         )}

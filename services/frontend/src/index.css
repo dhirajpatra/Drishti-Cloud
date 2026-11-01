@@ -37,3 +37,4 @@ button.rounded-lg,a.rounded-lg{border-radius:9999px}
 input.rounded-lg,select.rounded-lg,textarea.rounded-lg{border-radius:12px}
 header{box-shadow:0 1px 0 var(--line)}
 button.rounded-lg.text-left{border-radius:16px}
+:root[data-theme="dark"] .drishti-logo{filter:brightness(1.35) saturate(1.1)}

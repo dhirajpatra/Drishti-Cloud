@@ -103,3 +103,35 @@ MATCH (t:Tenant)-[:IN_CONTEXT]->(n:NewsContext) RETURN t.id, n.headline, n.sourc
 MATCH (t:Tenant)-[:HAS_CAMERA]->(c:Camera) RETURN t.id AS tenant, collect(c.id) AS cameras
 ```
 Dashboard notifications and live frames are kept in Redis (short-lived), not in Neo4j.
+
+## Show everything for one site (what the dashboard's graph shows, but big)
+The dashboard's **NEO4J BROWSER** link now opens this query already typed in for the selected site: click it, log in
+(`neo4j` / your `NEO4J_PASSWORD`), press **Ctrl+Enter**. The dashboard's **EXPAND** button shows the same graph full screen.
+```cypher
+MATCH p=(t:Tenant {id:'home_1_bangalore'})-[*1..2]-(n) RETURN p LIMIT 300
+```
+Using a parameter instead: `:param tenant_id => 'home_1_bangalore'` (or `:params {tenant_id: 'home_1_bangalore'}`), then use `$tenant_id`.
+If the graph looks crowded, click a node type in the bottom bar and choose caption `label`, or lower the `LIMIT`.
+
+## "My query returns nothing": it used relationships Drishti does not have
+A query like `(Tenant)-[:KNOWS]->(Person)-[:TRIGGERED]->(Event)-[:LOCATED_AT]->(Object)`, `e.at`, `e.kind`, `RELATED_TO_NEWS`
+matches no data, because the real graph is (see *Schema as built* above):
+`(Tenant)-[:HAS_PERSON]->(Person)`, `(Tenant)-[:HAS_EVENT]->(Event)-[:DETECTED_OBJECT]->(Object)`, `(Event)-[:TRIGGERED]->(Alert)`,
+`(Tenant)-[:IN_CONTEXT]->(NewsContext)`; events carry `timestamp` (not `at`) and `type`/`kind`; persons are not linked to events.
+The working version of "what happened in the last hour":
+```cypher
+MATCH (:Tenant {id: $tenant_id})-[:HAS_EVENT]->(e:Event)
+WHERE e.timestamp > datetime() - duration('PT1H')
+OPTIONAL MATCH (e)-[:DETECTED_OBJECT]->(o:Object)
+OPTIONAL MATCH (e)-[:TRIGGERED]->(a:Alert)
+RETURN e.timestamp AS time, e.camera_id AS camera, e.type AS rule, e.level AS level,
+       collect(DISTINCT o.name) AS objects, a.reason AS alert
+ORDER BY time DESC
+```
+And the news the site is currently aware of:
+```cypher
+MATCH (:Tenant {id: $tenant_id})-[:IN_CONTEXT]->(n:NewsContext)
+RETURN n.timestamp AS time, n.headline AS headline, n.source AS source ORDER BY time DESC LIMIT 20
+```
+Nothing in the last hour is normal when the scene is idle: only changed or alerting frames become `Event` nodes. Widen the window
+(`PT24H`) to check.
