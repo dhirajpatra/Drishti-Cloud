@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Eye, KeyRound, Moon, Sun } from "lucide-react";
+import { KeyRound, Moon, Sun } from "lucide-react";
 import { api, getToken, onUnauthorized, setToken } from "./api";
 import { usePoll } from "./lib";
 import Dashboard from "./pages/Dashboard";
@@ -81,7 +81,7 @@ export default function App() {
       <header className="sticky top-0 z-40 backdrop-blur border-b" style={{ background: "var(--header)", borderColor: "var(--line)" }}>
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-2">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg grid place-items-center font-bold" style={{ background: "var(--accent)", color: "var(--on-accent)" }}><Eye size={20} /></div>
+            <img src="/logo.png" alt="Drishti" width={40} height={40} className="w-10 h-10 object-contain drishti-logo" />
             <div>
               <p className="font-bold leading-none">DRISHTI CLOUD</p>
               <p className="mono text-[10px] tracking-widest hidden sm:block" style={{ color: "var(--muted)" }}>

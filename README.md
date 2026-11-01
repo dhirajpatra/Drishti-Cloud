@@ -243,6 +243,7 @@ Dashboard http://localhost:3000 · API http://localhost:8000/docs · Neo4j Brows
   else's stream, and scraping would break Meta's terms. Use the camera's own RTSP/HTTP/HLS URL, or restream your camera yourself.
 
 ### 4. WhatsApp alerts (Meta WhatsApp Business Cloud API)
+Free step-by-step setup with Meta's test number, the 24-hour rule and error fixes: **[docs/WHATSAPP.md](./docs/WHATSAPP.md)**.
 Set `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID`, `WHATSAPP_TO`. Free text only reaches a number that messaged your business number in the last 24 h; for real
 alerts create an approved template with one body variable and set `WHATSAPP_TEMPLATE`.
 
@@ -273,7 +274,7 @@ The dashboard uses a Meta Muse-style look: light and airy with Meta blue by defa
 5. **Event timeline**: every analysed frame with its picture and reason, including NORMAL ones.
 6. **Knowledge graph** and **usage** (model calls and tokens per model, per provider).
 
-Deep dives: **[Neo4j queries](./docs/NEO4J.md)** · **[Operations, cloud move, commands](./docs/OPERATIONS.md)** · **[Muse Code skill](./SKILL.md)**.
+Deep dives: **[WhatsApp setup](./docs/WHATSAPP.md)** · **[Neo4j queries](./docs/NEO4J.md)** · **[Operations, cloud move, commands](./docs/OPERATIONS.md)** · **[Muse Code skill](./SKILL.md)**.
 
 ---
 
