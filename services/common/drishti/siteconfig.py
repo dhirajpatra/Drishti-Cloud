@@ -383,8 +383,15 @@ def parse_feeds(spec: str) -> list[dict]:
     for item in [x.strip() for x in (spec or "").split(",") if x.strip()]:
         tag, sep, url = item.partition("=")
         parts = tag.split(":")
-        if not sep or len(parts) != 3 or parts[1] not in VERTICALS or not url:
+        if item.strip("\\ ") == "":
+            log.error("RTSP_FEEDS contains only a backslash: .env does not support line continuation. Put all cameras on ONE line, "
+                      "comma separated, or add them in the dashboard (Admin > camera > Connection).")
+            continue
+        if not sep or len(parts) != 3 or not url:
             log.error("ignoring malformed feed %r (want tenant:vertical:camera=url)", item.split("=")[0])
+            continue
+        if parts[1] not in VERTICALS:
+            log.error("ignoring feed %r: unknown vertical '%s' (use one of: %s)", item.split("=")[0], parts[1], ", ".join(VERTICALS))
             continue
         feeds.append({"tenant": parts[0], "vertical": parts[1], "camera": parts[2], "url": url})
     return feeds

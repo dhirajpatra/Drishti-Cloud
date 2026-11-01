@@ -185,3 +185,11 @@ def test_action_agent_uses_site_notify_settings(monkeypatch):
                             {"webhook_url": "https://hooks.example/site", "whatsapp_to": []})
     assert out == "sent" and calls == ["https://hooks.example/site"]
     assert aa.cooldown_allows(bus.redis_client(), "tx", "r1", "ALERT", cooldown=1)
+
+
+def test_feed_spec_survives_a_backslash_and_unknown_vertical(caplog):
+    spec = "\\"                                                       # what a .env line-continuation leaves behind
+    assert siteconfig.parse_feeds(spec) == []
+    assert "line continuation" in caplog.text
+    got = siteconfig.parse_feeds("fridge_1:fridge_inventory:inside=http://x/,home_1_bangalore:home_seniors:kitchen=http://192.168.1.50:8081/")
+    assert [f["camera"] for f in got] == ["kitchen"] and "unknown vertical" in caplog.text
