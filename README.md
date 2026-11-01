@@ -1,7 +1,7 @@
 <p align="center">
   <img src="docs/images/logo.png" width="120" />
 </p>
-# Drishti - Muse App for Security Agencies
+# Drishti Cloud - Muse App for Security Agencies
 
 > **Personal security superintelligence that watches your world, so you don't have to.**
 > One dashboard for a security agency's clients: mall, home seniors, school, ICU. It sees every camera, remembers what is normal for each site, and speaks up fast on WhatsApp and on the spot when something is wrong.
@@ -17,6 +17,9 @@
 
 ![Drishti dashboard](./docs/images/drishti-dashboard1.png)
 ![Drishti HELP sign read](./docs/images/help_sign_read.png)
+![Drishti Code](./docs/images/code.png)
+![Drishti Docker Containers](./docs/images/containers.png)
+![Drishti Cloud Demo](./docs/videos/demo.mp4)
 
 ### 🎥 2-minute demo
 **Video:** `<add YouTube link here>` - kitchen camera (motionEye) → fall alert with proof picture → Neo4j habit graph → switch to mall and ICU tenants.
