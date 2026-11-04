@@ -1,0 +1,9 @@
+# Run this AT THE CAMERA SITE (any laptop / mini PC / Raspberry Pi 5 on the same network as the cameras):
+#   cp .env.example .env   # fill in the values Admin > Connect a camera shows you
+#   docker compose up -d --build
+services:
+  camera-agent:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    network_mode: host           # reaches 192.168.x.x cameras exactly like your own computer does

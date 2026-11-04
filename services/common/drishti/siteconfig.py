@@ -9,13 +9,12 @@ within seconds, without a restart and without editing .env.
 from __future__ import annotations
 
 import copy
-import ipaddress
 import re
 import time
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
-from . import db, vault
+from . import camurl, db, vault
 from .config import settings
 from .log import get_logger
 from .verticals import ACTION_KINDS, RULE_INFO, THRESHOLD_INFO, VERTICALS
@@ -300,6 +299,7 @@ def validate_source(data: dict) -> dict:
     if not isinstance(data, dict):
         raise ConfigError("camera settings must be an object")
     scheme = str(data.get("scheme", "http")).lower()
+    scheme = "rtsp" if scheme == "tcp" else scheme                # ngrok shows an RTSP tunnel as tcp://host:port
     if scheme not in SCHEMES:
         raise ConfigError(f"protocol must be one of: {', '.join(SCHEMES)}")
     path = str(data.get("path") or "/").strip()
@@ -314,11 +314,9 @@ def validate_source(data: dict) -> dict:
     if not _HOST.match(host):
         raise ConfigError("host must be an IP address or a name (no spaces, no http://)")
     try:
-        ip = ipaddress.ip_address(host.strip("[]"))
-    except ValueError:
-        ip = None                                                 # a DNS name
-    if ip and (ip.is_link_local or ip.is_multicast or ip.is_unspecified):
-        raise ConfigError("that address is not a camera address")
+        camurl.check_host(host, settings.allow_private_camera_hosts)
+    except camurl.HostNotAllowed as exc:
+        raise ConfigError(str(exc)) from None
     port = data.get("port")
     port = None if port in (None, "") else _int(port, 1, 65535, "port")
     user = str(data.get("username") or "")
@@ -386,7 +384,7 @@ def parse_feeds(spec: str) -> list[dict]:
         if not sep or len(parts) != 3 or parts[1] not in VERTICALS or not url:
             log.error("ignoring malformed feed %r (want tenant:vertical:camera=url)", item.split("=")[0])
             continue
-        feeds.append({"tenant": parts[0], "vertical": parts[1], "camera": parts[2], "url": url})
+        feeds.append({"tenant": parts[0], "vertical": parts[1], "camera": parts[2], "url": camurl.normalize_url(url)})
     return feeds
 
 

@@ -134,6 +134,9 @@ Real usage numbers for your own deployment are at `GET /usage` and in the dashbo
 - **Multi-tenant by design**: Postgres **row-level security** (forced), Neo4j `tenant_id` on every node, a Redis stream **per tenant per stage** with
   fair round-robin consumption, per-tenant API keys, optional admin token, per-tenant rate limit.
 - **Connect more cameras from the dashboard** (mall gates, school corridors, ICU beds, rooms): snapshot / MJPEG, RTSP, HLS `.m3u8`, MP4.
+- **Guarded and teachable**: model replies are validated, spoken text may never accuse or give medical orders, a model-only CRITICAL on a bad picture is held at ALERT, owner
+  text and OCR are treated as data not instructions, and an alert storm becomes one digest. Operators press **CONFIRMED / FALSE ALARM**; Drishti learns per rule and hour with
+  decayed evidence and a safety floor (emergencies are never muted) and shows its numbers in *Learned from your feedback*. Details: [AGENT.md](./AGENT.md).
 - **Resilient**: dead-letter queues after retries, graceful degradation to rules, circuit breaker for a misbehaving model, health checks on every service.
 - **Scales**: every agent is stateless: `docker compose up -d --scale spark-multimodal=3`.
 
@@ -241,6 +244,10 @@ Dashboard http://localhost:3000 · API http://localhost:8000/docs · Neo4j Brows
   `http://<laptop-LAN-ip>:8000/hook/motion/<tenant>/<camera>?token=<MOTION_HOOK_TOKEN>`, with `GATEWAY_BIND_ADDR=0.0.0.0` so the camera can reach the gateway.
   `<camera>` must equal the camera id in `RTSP_FEEDS`. Test: `curl "http://localhost:8000/hook/motion/home_1_bangalore/kitchen?token=..."` returns `{"status":"triggered"}`;
   the ingestor log then shows `motion hook -> analysing now`. One analysis per camera per `MOTION_HOOK_COOLDOWN_SEC` (60), so a busy room cannot burn your budget.
+- **A private camera that is not on your network** (home, mall, school, ICU ward elsewhere): **[docs/REMOTE_CAMERAS.md](./docs/REMOTE_CAMERAS.md)**. Run the tiny
+  **edge camera agent** (`edge/camera-agent`) at the site: it reads the private RTSP URL locally and pushes pictures to Drishti over HTTPS, with **no VPN, no ngrok and no open
+  port**, and the camera password never leaves the site. Pair it in *Admin > Connect a camera*. Tailscale / WireGuard / OpenVPN and an ngrok TCP tunnel also work
+  (templates in `deploy/remote/`), and *TEST CONNECTION* shows which step (`dns -> tcp -> rtsp -> frame`) failed.
 - **More cameras**: dashboard panel *Camera sources*, or `POST /tenants/{id}/feeds {"camera_id":"bedroom","url":"rtsp://..."}`.
 - **Facebook / Instagram Live**: not supported, deliberately. Meta's Live Video API only lets an app *create and push* a broadcast; there is no API to read someone
   else's stream, and scraping would break Meta's terms. Use the camera's own RTSP/HTTP/HLS URL, or restream your camera yourself.

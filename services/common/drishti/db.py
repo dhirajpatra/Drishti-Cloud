@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from contextlib import contextmanager
@@ -20,7 +21,7 @@ from .config import settings
 
 _pool: ConnectionPool | None = None
 
-TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources", "inventory", "feedback")
+TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources", "inventory", "feedback", "edge_tokens")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -119,6 +120,16 @@ CREATE TABLE IF NOT EXISTS feedback (               -- operator verdicts on aler
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS feedback_tenant_rule ON feedback (tenant_id, rule, created_at DESC);
+CREATE TABLE IF NOT EXISTS edge_tokens (            -- site tokens for the edge camera agent: may only send frames for ONE tenant
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id  text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  label      text NOT NULL DEFAULT '',
+  token_hash text NOT NULL,                      -- sha256 of the token; the token itself is shown once and never stored
+  revoked    boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  last_seen  timestamptz
+);
+CREATE INDEX IF NOT EXISTS edge_tokens_hash ON edge_tokens (tenant_id, token_hash);
 CREATE TABLE IF NOT EXISTS notes (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id  text NOT NULL,
@@ -407,6 +418,45 @@ def feedback_rows(tenant_id: str, days: int = 60) -> list[dict]:
             """SELECT rule, hour, verdict, created_at FROM feedback
                WHERE tenant_id=%s AND created_at > now() - make_interval(days => %s)""", (tenant_id, days)
         ).fetchall()
+
+
+# ------------------------------------------------------------------ edge camera-agent tokens
+def _tok_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def create_edge_token(tenant_id: str, label: str) -> tuple[dict, str]:
+    """Returns (row without secrets, the token). The token is only ever available from this return value."""
+    token = "dre_" + secrets.token_urlsafe(32)
+    with _conn(tenant_id) as c:
+        row = c.execute(
+            """INSERT INTO edge_tokens (tenant_id, label, token_hash) VALUES (%s, %s, %s)
+               RETURNING id::text AS id, label, revoked, created_at, last_seen""", (tenant_id, label[:60], _tok_hash(token))
+        ).fetchone()
+    return row, token
+
+
+def list_edge_tokens(tenant_id: str) -> list[dict]:
+    with _conn(tenant_id) as c:
+        return c.execute("""SELECT id::text AS id, label, revoked, created_at, last_seen FROM edge_tokens
+                            WHERE tenant_id=%s ORDER BY created_at DESC""", (tenant_id,)).fetchall()
+
+
+def revoke_edge_token(tenant_id: str, token_id: str) -> int:
+    with _conn(tenant_id) as c:
+        return c.execute("UPDATE edge_tokens SET revoked=true WHERE id=%s::uuid AND tenant_id=%s AND NOT revoked",
+                         (token_id, tenant_id)).rowcount
+
+
+def verify_edge_token(tenant_id: str, token: str) -> bool:
+    """True for a live token of exactly this tenant. last_seen is refreshed at most once a minute."""
+    with _conn(tenant_id) as c:
+        row = c.execute("SELECT id FROM edge_tokens WHERE tenant_id=%s AND token_hash=%s AND NOT revoked",
+                        (tenant_id, _tok_hash(token))).fetchone()
+        if row:
+            c.execute("UPDATE edge_tokens SET last_seen=now() WHERE id=%s AND (last_seen IS NULL OR last_seen < now() - interval '1 minute')",
+                      (row["id"],))
+    return bool(row)
 
 
 def vertical_stats(vertical: str) -> dict:

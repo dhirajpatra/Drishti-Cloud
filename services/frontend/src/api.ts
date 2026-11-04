@@ -152,7 +152,9 @@ export interface AdminTenant { id: string; name: string; location: string; verti
 export interface AdminOverview { tenants: AdminTenant[]; auth_required: boolean; secrets_key_custom: boolean; whatsapp_configured: boolean; default_whatsapp_numbers: number; default_webhook: boolean }
 export interface CameraConn { camera_id: string; scheme: string; host: string; port: number | null; path: string; username: string; has_password: boolean; enabled: boolean; source: string }
 export interface CameraForm extends Omit<CameraConn, "camera_id" | "has_password" | "source"> { password?: string; clear_password?: boolean }
-export interface TestResult { ok: boolean; bytes: number; error: string; preview?: string }
+export interface TestStage { stage: string; ok: boolean; detail: string; hint?: string }
+export interface TestResult { ok: boolean; bytes: number; error: string; preview?: string; stages?: TestStage[] }
+export interface EdgeToken { id: string; label: string; revoked: boolean; created_at: string; last_seen: string | null; token?: string }
 const T = (id: string) => `/admin/tenants/${encodeURIComponent(id)}`;
 const Q = (cam: string) => (cam ? `?camera=${encodeURIComponent(cam)}` : "");
 
@@ -180,6 +182,9 @@ export const api = {
   usage: () => json<Usage>("/usage"),
   ack: (alertId: string, falseAlarm = false, confirmed = false) =>
     json<{ ok: true }>(`/alerts/${encodeURIComponent(alertId)}/ack`, jsonInit("POST", { false_alarm: falseAlarm, confirmed })),
+  edgeTokens: (id: string) => json<EdgeToken[]>(`/tenants/${encodeURIComponent(id)}/edge-tokens`),
+  createEdgeToken: (id: string, label: string) => json<EdgeToken>(`/tenants/${encodeURIComponent(id)}/edge-tokens`, jsonInit("POST", { label })),
+  revokeEdgeToken: (id: string, tokenId: string) => json<{ ok: true }>(`/tenants/${encodeURIComponent(id)}/edge-tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
   learning: (id: string) => json<Learning>(`/tenants/${encodeURIComponent(id)}/learning`),
   alertImageBlob: async (alertId: string): Promise<Blob> => {
     const res = await raw(`/alerts/${encodeURIComponent(alertId)}/image`);
