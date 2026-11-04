@@ -3,6 +3,7 @@ import { api, type CreatedTenant } from "../api";
 import { usePoll, verticalColor } from "../lib";
 import { TenantList, ApiKeyBox } from "../components/TenantList";
 import { AlertFeed } from "../components/AlertFeed";
+import { Learned } from "../components/Learned";
 import { ActuationList, EventTimeline } from "../components/EventsActuations";
 import { LiveCameras } from "../components/LiveCameras";
 import { Notifications } from "../components/Notifications";
@@ -93,6 +94,7 @@ export default function Dashboard() {
             <FeedSources key={`f-${tenant.id}`} tenantId={tenant.id} />
             <Inventory key={`i-${tenant.id}`} tenantId={tenant.id} />
             <AlertFeed alerts={alerts.data} loading={alerts.loading} error={alerts.error} reload={alerts.reload} />
+            <Learned key={`l-${tenant.id}`} tenantId={tenant.id} />
             <div className="grid xl:grid-cols-2 gap-4">
               <EventTimeline tenantId={tenant.id} events={events.data} loading={events.loading} error={events.error} />
               <ActuationList items={acts.data} loading={acts.loading} error={acts.error} />

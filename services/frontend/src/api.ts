@@ -25,6 +25,8 @@ export interface NewTenantBody { id: string; vertical: VerticalId; name?: string
 export interface CreatedTenant {
   id: string; vertical: VerticalId; name: string; location: string; api_key: string; created_at: string;
 }
+export type LearningItem = { rule: string; hour: number; false: number; confirmed: number; p_false: number; muted: boolean; why: string };
+export type Learning = { half_life_days: number; min_evidence: number; suppress_p: number; protected: string[]; items: LearningItem[] };
 export interface Alert {
   id: string; tenant_id: string; vertical: VerticalId; level: AlertLevel; rule: string; reason: string;
   rationale: string; speak_text: string; objects: string[]; actions: string[]; frame_id: string;
@@ -176,8 +178,9 @@ export const api = {
   graph: (id: string) => json<GraphData>(`/tenants/${encodeURIComponent(id)}/graph`),
   verticalStats: (v: string) => json<VerticalStats>(`/verticals/${encodeURIComponent(v)}/stats`),
   usage: () => json<Usage>("/usage"),
-  ack: (alertId: string, falseAlarm = false) =>
-    json<{ ok: true }>(`/alerts/${encodeURIComponent(alertId)}/ack`, jsonInit("POST", { false_alarm: falseAlarm })),
+  ack: (alertId: string, falseAlarm = false, confirmed = false) =>
+    json<{ ok: true }>(`/alerts/${encodeURIComponent(alertId)}/ack`, jsonInit("POST", { false_alarm: falseAlarm, confirmed })),
+  learning: (id: string) => json<Learning>(`/tenants/${encodeURIComponent(id)}/learning`),
   alertImageBlob: async (alertId: string): Promise<Blob> => {
     const res = await raw(`/alerts/${encodeURIComponent(alertId)}/image`);
     return res.blob();
