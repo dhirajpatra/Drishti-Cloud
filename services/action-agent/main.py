@@ -15,12 +15,13 @@ from datetime import datetime
 
 import httpx
 
-from drishti import bus, db, graph, inventory, siteconfig
+from drishti import bus, db, graph, guardrails, inventory, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import RANK, VERTICALS
 
 log = get_logger("action-agent")
+STORM = guardrails.StormBreaker(settings.storm_limit, settings.storm_window_sec)
 EDGE_KINDS = {"speak", "oled", "isd1820"}
 OLED_TEXT = {"fall_detected": "FALL!", "patient_on_floor": "FALL!", "monitor_alarm": "ALARM", "help_called": "HELP!"}
 
@@ -111,7 +112,16 @@ def handle(p: dict, r) -> None:
 
     alert = None
     cfg = siteconfig.effective(tid, p.get("camera_id", "cam_1"), vertical)
-    if level != "NORMAL" and cooldown_allows(r, tid, p.get("rule", ""), level, p.get("cooldown_sec")):
+    allowed = level != "NORMAL" and cooldown_allows(r, tid, p.get("rule", ""), level, p.get("cooldown_sec"))
+    if allowed:
+        storm = STORM.check(r, tid, level)       # G5: a flood of ALERTs becomes one digest; CRITICAL always passes
+        if storm != "ok":
+            allowed = False
+            if storm == "digest":
+                bus.notify(tid, "alert", "WARNING", f"More than {settings.storm_limit} alerts in {settings.storm_window_sec // 60} min - holding the rest",
+                           "Likely a camera or lighting problem. CRITICAL alerts still come through; events are still recorded.", r=r)
+                log.warning("alert storm at %s: further ALERTs held for %ss", tid, settings.storm_window_sec)
+    if allowed:
         image = bus.get_proof(p["frame_id"]) if p.get("has_proof") else None
         kinds = cfg["notify"]["policy"].get(level) or VERTICALS[vertical]["policy"][level]
         alert_id = db.save_alert(tid, vertical, level, p.get("rule", ""), p.get("reason", ""), p.get("rationale", ""),

@@ -5,6 +5,8 @@ import time
 from typing import Dict, List, Optional
 import httpx
 
+from drishti import bus
+
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -15,6 +17,8 @@ WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN", "").strip()
 WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "").strip()
 WHATSAPP_TO = [num.strip() for num in os.getenv("WHATSAPP_TO", "").split(",") if num.strip()]
 WHATSAPP_TEMPLATE = os.getenv("WHATSAPP_TEMPLATE", "").strip()
+API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v21.0").strip()
+STARTUP_NOTICE = os.getenv("WHATSAPP_STARTUP_NOTICE", "false").lower() in ("true", "1", "yes")  # off: a restart must not message people
 MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ("true", "1", "yes") or not WHATSAPP_TOKEN
 
 
@@ -23,7 +27,7 @@ def send_whatsapp_message(recipient: str, message_text: str) -> bool:
         logger.info(f"[WhatsApp-Connector] MOCK SEND to {recipient}:\n{message_text}")
         return True
 
-    url = f"https://graph.facebook.com/v18.0/{WHATSAPP_PHONE_ID}/messages"
+    url = f"https://graph.facebook.com/{API_VERSION}/{WHATSAPP_PHONE_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json"
@@ -36,7 +40,7 @@ def send_whatsapp_message(recipient: str, message_text: str) -> bool:
             "type": "template",
             "template": {
                 "name": WHATSAPP_TEMPLATE,
-                "language": {"code": "en_US"},
+                "language": {"code": os.getenv("WHATSAPP_TEMPLATE_LANG", "en_US")},
                 "components": [
                     {
                         "type": "body",
@@ -71,7 +75,7 @@ def dispatch_alert(alert_title: str, body_details: str, severity: str = "INFO"):
         f"{icon} *DRISHTI MULTI-AGENT ALERT* [{severity}]\n"
         f"*Event:* {alert_title}\n"
         f"*Details:* {body_details}\n"
-        f"_Time: {time.strftime('%Y-%m-%d %H:%M:%S IST')}_"
+        f"_Time: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}_"
     )
 
     for phone_number in WHATSAPP_TO:
@@ -83,15 +87,20 @@ def main():
     if MOCK_MODE:
         logger.info("[WhatsApp-Connector] Running in MOCK MODE (messages will be logged to console).")
 
-    # Send startup confirmation notification
-    dispatch_alert(
-        alert_title="System Startup",
-        body_details="Multi-Agent Vision Pipeline online. Monitoring video streams.",
-        severity="INFO"
-    )
+    # Opt-in only (WHATSAPP_STARTUP_NOTICE=true): handy once to prove the credentials work
+    if STARTUP_NOTICE:
+        dispatch_alert(
+            alert_title="System Startup",
+            body_details="Multi-Agent Vision Pipeline online. Monitoring video streams.",
+            severity="INFO"
+        )
 
     while True:
-        # In production architecture, poll Redis/Bus queue for agent messages
+        # Alerts are delivered by action-agent; this service is a stand-alone sender for testing the credentials
+        try:
+            bus.heartbeat("whatsapp-connector")
+        except Exception:  # noqa: BLE001
+            pass
         time.sleep(30)
 
 

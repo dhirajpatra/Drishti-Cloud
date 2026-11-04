@@ -1,146 +1,90 @@
-import base64
-import json
-import logging
+"""Grocery price agent (optional, compose profile `extras`).
+
+Looks at the latest picture of one camera (default: the kitchen/fridge of the demo home) and asks Muse Spark for the
+visible grocery items with a *rough* shelf price in INR. Results arrive as a dashboard notification, clearly marked as
+an estimate read off the picture, never a real price list.
+
+It goes through the shared LLM client, so it obeys the same daily call caps, provider chain and retries as every
+other agent, and it never sends a made-up picture: with no frame (or no key / MOCK_MODE) it simply waits.
+"""
+from __future__ import annotations
+
 import os
 import time
-from typing import Any, Dict, List
-import httpx
 
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+from drishti import bus, llm
+from drishti.config import settings
+from drishti.log import get_logger
+
+log = get_logger("grocery-price-agent")
+TENANT = os.getenv("GROCERY_TENANT", "home_1_bangalore")
+CAMERA = os.getenv("GROCERY_CAMERA", "fridge")
+INTERVAL = max(60, int(os.getenv("GROCERY_INTERVAL_SEC", "900")))
+CONDITIONS = {"fresh", "packaging_damaged", "near_expiry"}
+
+PROMPT = (
+    "You are a grocery vision assistant. List the grocery items clearly visible in this picture with a rough "
+    "shelf price in INR and any visible discount badge. Do not guess items you cannot see. "
+    'Return JSON only: {"items":[{"item_name":"","brand":"unknown","est_price_inr":0,'
+    '"discount_detected":false,"condition":"fresh|packaging_damaged|near_expiry"}]}'
 )
-logger = logging.getLogger("grocery-price-agent")
-
-MOCK_MODE = os.getenv("MOCK_MODE", "false").lower() in ("true", "1", "yes")
-BASETEN_API_KEY = os.getenv("BASETEN_API_KEY", "").strip()
-BASETEN_API_URL = os.getenv("BASETEN_API_URL", "https://inference.baseten.co/v1").rstrip("/")
-LLAMA_API_KEY = os.getenv("LLAMA_API_KEY", "").strip()
-LLAMA_API_URL = os.getenv("LLAMA_API_URL", "https://api.meta.ai/v1/responses").rstrip("/")
-
-SPARK_MODEL = os.getenv("SPARK_MODEL", "baseten:meta-models/muse-spark-open-1026|muse-spark-1.3")
-REASONING_EFFORT_FAST = os.getenv("REASONING_EFFORT_FAST", "minimal")
-FAST_HEADROOM_TOKENS = int(os.getenv("FAST_HEADROOM_TOKENS", "512"))
-SAMPLE_INTERVAL_SEC = int(os.getenv("SAMPLE_INTERVAL_SEC", "120"))
-GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:8000")
 
 
-def resolve_credentials() -> tuple[str, str, str]:
-    models = [m.strip() for m in SPARK_MODEL.split("|")]
-    if BASETEN_API_KEY:
-        for m in models:
-            if m.startswith("baseten:"):
-                return BASETEN_API_URL, BASETEN_API_KEY, m.replace("baseten:", "")
-    if LLAMA_API_KEY:
-        for m in models:
-            return LLAMA_API_URL, LLAMA_API_KEY, m.replace("baseten:", "")
-    return "", "", ""
-
-
-def analyze_grocery_prices_with_muse(image_data_uri: str) -> List[Dict[str, Any]]:
-    api_url, api_key, model_id = resolve_credentials()
-
-    if MOCK_MODE or not api_key:
-        logger.info("[Grocery-Price] MOCK_MODE active or key missing. Returning simulated price intelligence.")
-        return [
-            {"item_name": "organic_milk_1l", "brand": "Amul", "est_price_inr": 68, "discount_detected": True, "condition": "fresh"},
-            {"item_name": "whole_wheat_bread", "brand": "Britannia", "est_price_inr": 50, "discount_detected": False, "condition": "fresh"},
-        ]
-
-    prompt = (
-        "You are an intelligent retail grocery vision agent. Analyze the provided camera frame showing grocery items, packages, or shelf stock.\n"
-        "Identify all consumer goods, estimated local retail prices (in INR), visible branding, and discount badges if present.\n\n"
-        "Return ONLY a JSON list of objects matching this schema:\n"
-        "[\n"
-        "  {\n"
-        "    \"item_name\": \"string\",\n"
-        "    \"brand\": \"string or unknown\",\n"
-        "    \"est_price_inr\": number,\n"
-        "    \"discount_detected\": boolean,\n"
-        "    \"condition\": \"fresh | packaging_damaged | near_expiry\"\n"
-        "  }\n"
-        "]\n"
-        "Do not include markdown tags or conversational filler."
-    )
-
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model_id,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_data_uri}}
-                ]
-            }
-        ],
-        "max_tokens": FAST_HEADROOM_TOKENS,
-        "reasoning_effort": REASONING_EFFORT_FAST,
-        "temperature": 0.1
-    }
-
-    try:
-        endpoint = f"{api_url}/chat/completions" if not api_url.endswith("/completions") else api_url
-        with httpx.Client(timeout=30.0) as client:
-            res = client.post(endpoint, headers=headers, json=payload)
-            res.raise_for_status()
-            text = res.json()["choices"][0]["message"]["content"].strip()
-            if text.startswith("```"):
-                text = text.split("```")[1].replace("json", "")
-            return json.loads(text.strip())
-    except Exception as e:
-        logger.error(f"[Grocery-Price] Muse Spark API error: {e}")
-        return []
-
-
-def process_grocery_intelligence(tenant_id: str, items: List[Dict[str, Any]]):
-    if not items:
-        return
-
-    total_est_value = sum(i.get("est_price_inr", 0) for i in items)
-    discounted_items = [i for i in items if i.get("discount_detected")]
-
-    payload = {
-        "tenant_id": tenant_id,
-        "agent": "grocery-price-agent",
-        "detected_item_count": len(items),
-        "total_estimated_value_inr": total_est_value,
-        "discounted_items_count": len(discounted_items),
-        "items": items,
-        "timestamp": time.time()
-    }
-
-    logger.info(f"[Grocery-Price] Syncing pricing matrix for {tenant_id}: Total ~₹{total_est_value}")
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            client.post(f"{GATEWAY_URL}/api/events/grocery-price", json=payload)
-    except Exception as e:
-        logger.warning(f"[Grocery-Price] Gateway notify skipped: {e}")
-
-
-def main():
-    logger.info("Starting Grocery Price Intelligence Agent...")
-    tenant_id = os.getenv("TENANT_ID", "home_1_bangalore")
-
-    while True:
+def clean_items(raw) -> list[dict]:
+    """Keep only well-formed items; clamp absurd prices so a model slip cannot produce a wild total."""
+    out = []
+    for it in (raw.get("items") if isinstance(raw, dict) else raw) or []:
+        if not isinstance(it, dict) or not isinstance(it.get("item_name"), str) or not it["item_name"].strip():
+            continue
         try:
-            # Placeholder or latest frame path
-            sample_path = "/tmp/grocery_latest.jpg"
-            if os.path.exists(sample_path):
-                with open(sample_path, "rb") as f:
-                    data_uri = f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode('utf-8')}"
-            else:
-                data_uri = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBD-placeholder"
+            price = min(100000.0, max(0.0, float(it.get("est_price_inr", 0))))
+        except (TypeError, ValueError):
+            price = 0.0
+        cond = it.get("condition") if it.get("condition") in CONDITIONS else "fresh"
+        out.append({"item_name": it["item_name"].strip()[:40], "brand": str(it.get("brand") or "unknown")[:30],
+                    "est_price_inr": round(price), "discount_detected": bool(it.get("discount_detected")), "condition": cond})
+    return out[:40]
 
-            logger.info("[Grocery-Price] Processing camera frame...")
-            detected = analyze_grocery_prices_with_muse(data_uri)
-            process_grocery_intelligence(tenant_id, detected)
 
-        except Exception as e:
-            logger.error(f"[Grocery-Price] Loop error: {e}")
+def summarize(items: list[dict]) -> tuple[str, str]:
+    total = sum(i["est_price_inr"] for i in items)
+    deals = [i["item_name"] for i in items if i["discount_detected"]]
+    worn = [i["item_name"] for i in items if i["condition"] != "fresh"]
+    detail = "Estimated from the picture, not a price list. " + (f"Discounts seen: {', '.join(deals[:5])}. " if deals else "") \
+        + (f"Check condition: {', '.join(worn[:5])}." if worn else "")
+    return f"Groceries in view: {len(items)} items, about Rs {total} (estimate)", detail.strip()
 
-        time.sleep(SAMPLE_INTERVAL_SEC)
+
+def once(r) -> int:
+    if settings.mock_mode or not llm.budget_ok(r, settings.spark_model):
+        return 0
+    jpeg = bus.get_latest(TENANT, CAMERA)
+    if not jpeg:
+        log.info("no recent picture for %s/%s - nothing to price", TENANT, CAMERA)
+        return 0
+    res = llm.chat_json(settings.spark_model, [{"role": "user", "content": [{"type": "text", "text": PROMPT}, llm.image_part(jpeg)]}],
+                        max_tokens=600, r=r, reasoning=False)
+    items = clean_items(res)
+    if items:
+        title, detail = summarize(items)
+        bus.notify(TENANT, "info", "INFO", title, detail, r=r)
+    return len(items)
+
+
+def main() -> None:
+    r = bus.redis_client()
+    log.info("grocery price agent on %s/%s every %ss", TENANT, CAMERA, INTERVAL)
+    while not bus.stopping():
+        try:
+            bus.heartbeat("grocery-price-agent", r)
+            once(r)
+        except Exception:  # noqa: BLE001
+            log.exception("grocery pass failed")
+        for _ in range(INTERVAL // 10):
+            if bus.stopping():
+                return
+            bus.heartbeat("grocery-price-agent", r)
+            time.sleep(10)
 
 
 if __name__ == "__main__":

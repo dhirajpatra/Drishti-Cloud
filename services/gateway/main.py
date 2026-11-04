@@ -21,7 +21,7 @@ from fastapi.responses import Response
 from PIL import Image, ImageFilter, ImageOps, ImageStat, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from drishti import bus, db, graph, inventory, siteconfig
+from drishti import bus, db, graph, inventory, learning, siteconfig
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import VERTICALS, sop_for
@@ -543,20 +543,34 @@ def alert_image(alert_id: str, request: Request):
 
 class AckIn(BaseModel):
     false_alarm: bool = False
+    confirmed: bool = False       # "this was a real event": the other half of the feedback the platform learns from
 
 
 @app.post("/alerts/{alert_id}/ack")
 def ack_alert(alert_id: str, request: Request, body: AckIn = Body(default_factory=AckIn)):
+    if body.false_alarm and body.confirmed:
+        raise HTTPException(422, "an alert is either a false alarm or confirmed, not both")
     a = _alert_or_404(alert_id, request)
     db.ack_alert(alert_id, a["tenant_id"], body.false_alarm)
+    hour = a["created_at"].astimezone().hour
+    if (body.false_alarm or body.confirmed) and a.get("rule") and a["rule"] != "llm_assessment":
+        # Feedback loop: every verdict is evidence (see learning.py); a lone click never mutes anything.
+        db.save_feedback(a["tenant_id"], alert_id, a["rule"], hour, "false_alarm" if body.false_alarm else "confirmed")
     if body.false_alarm and a["level"] == "ALERT" and a.get("rule") and a["rule"] != "llm_assessment":
-        # Feedback loop: a false alarm teaches the home a habit for that hour.
-        hour = a["created_at"].astimezone().hour
-        graph.add_habit(
+        graph.add_habit(   # memory in the knowledge graph (shown on the dashboard); muting itself needs the evidence above
             a["tenant_id"], None, f"Learned: '{a['rule']}' around {hour:02d}:00 was a false alarm",
             rule=a["rule"], start_hour=hour, end_hour=min(24, hour + 1), learned=True,
         )
     return {"ok": True}
+
+
+@app.get("/tenants/{tenant_id}/learning")
+def tenant_learning(tenant_id: str, request: Request):
+    """What the platform has learned from operator feedback, with the numbers behind every decision."""
+    require_tenant(tenant_id, request)
+    rows = db.feedback_rows(tenant_id, learning.WINDOW_DAYS)
+    return {"half_life_days": learning.HALF_LIFE_DAYS, "min_evidence": learning.MIN_EVIDENCE, "suppress_p": learning.SUPPRESS_P,
+            "protected": sorted(learning.PROTECTED), "items": learning.summary(rows)}
 
 
 @app.get("/edge/{tenant_id}/actuate")
