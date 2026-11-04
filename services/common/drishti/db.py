@@ -20,7 +20,7 @@ from .config import settings
 
 _pool: ConnectionPool | None = None
 
-TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources", "inventory")
+TENANT_TABLES = ("events", "alerts", "actuations", "notes", "site_config", "camera_sources", "inventory", "feedback")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -110,6 +110,15 @@ CREATE TABLE IF NOT EXISTS inventory (
   updated_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, name)
 );
+CREATE TABLE IF NOT EXISTS feedback (               -- operator verdicts on alerts: what the platform learns from
+  alert_id   uuid PRIMARY KEY,
+  tenant_id  text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  rule       text NOT NULL,
+  hour       integer NOT NULL,
+  verdict    text NOT NULL CHECK (verdict IN ('false_alarm', 'confirmed')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS feedback_tenant_rule ON feedback (tenant_id, rule, created_at DESC);
 CREATE TABLE IF NOT EXISTS notes (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id  text NOT NULL,
@@ -380,6 +389,24 @@ def ack_alert(alert_id: str, tenant_id: str, false_alarm: bool) -> None:
             "UPDATE alerts SET acknowledged=true, false_alarm=%s WHERE id=%s::uuid AND tenant_id=%s",
             (false_alarm, alert_id, tenant_id),
         )
+
+
+def save_feedback(tenant_id: str, alert_id: str, rule: str, hour: int, verdict: str) -> None:
+    """One verdict per alert (the operator may change their mind: the newest click wins)."""
+    with _conn(tenant_id) as c:
+        c.execute(
+            """INSERT INTO feedback (alert_id, tenant_id, rule, hour, verdict) VALUES (%s::uuid, %s, %s, %s, %s)
+               ON CONFLICT (alert_id) DO UPDATE SET verdict=EXCLUDED.verdict, created_at=now()""",
+            (alert_id, tenant_id, rule, hour, verdict),
+        )
+
+
+def feedback_rows(tenant_id: str, days: int = 60) -> list[dict]:
+    with _conn(tenant_id) as c:
+        return c.execute(
+            """SELECT rule, hour, verdict, created_at FROM feedback
+               WHERE tenant_id=%s AND created_at > now() - make_interval(days => %s)""", (tenant_id, days)
+        ).fetchall()
 
 
 def vertical_stats(vertical: str) -> dict:

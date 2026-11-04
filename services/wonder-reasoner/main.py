@@ -8,7 +8,7 @@ Without an LLM (MOCK_MODE / budget exhausted) the same policy runs deterministic
 """
 from __future__ import annotations
 
-from drishti import bus, graph, llm, rules
+from drishti import bus, db, graph, guardrails, learning, llm, rules
 from drishti.config import settings
 from drishti.log import get_logger
 from drishti.verticals import LEVELS, RANK
@@ -34,7 +34,11 @@ Return JSON only: {{"final_level":"NORMAL|ALERT|CRITICAL","habit_match":"<habit 
 
 
 def match_habit(habits: list[dict], rule: str, hour: int) -> dict | None:
+    """Habits the OWNER described. Habits the system learned from false-alarm clicks are not trusted by themselves:
+    they only mute an alert through learning.decide(), which needs enough fresh evidence (and never for protected rules)."""
     for h in habits:
+        if h.get("learned"):
+            continue
         s, e = h.get("start_hour"), h.get("end_hour")
         if h.get("rule") == rule and s is not None and s <= hour < (e if e is not None else 24):
             return h
@@ -69,6 +73,12 @@ def handle(p: dict, r) -> None:
 
     habit = match_habit(habits, rule, hour) if rule else None
     headline = news_hit(rule, news)
+    learn = {"suppress": False, "why": ""}
+    if level == "ALERT" and rule and not habit:
+        try:
+            learn = learning.decide(db.feedback_rows(tid), rule, hour)
+        except Exception:  # noqa: BLE001 - feedback is an optimisation, never a reason to drop an alert
+            log.exception("feedback lookup failed - not learning")
     final, decision = level, "CONFIRMED"
     rationale, speak = p.get("rationale", ""), p.get("speak_text", "")
 
@@ -78,28 +88,31 @@ def handle(p: dict, r) -> None:
     elif level == "ALERT" and headline:
         final, decision = "CRITICAL", "ESCALATED_NEWS"
         rationale = f"Escalated because of local news: '{headline}'. {rationale}".strip()
+    elif level == "ALERT" and learn["suppress"]:
+        final, decision = "NORMAL", "SUPPRESSED_LEARNED"
+        rationale = f"Learned from operator feedback: {learn['why']}. {rationale}".strip()
 
     if level == "ALERT" and not settings.mock_mode and llm.budget_ok(r, settings.wonder_model):
         try:
             res = llm.chat_json(settings.wonder_model, [{"role": "user", "content": PROMPT.format(
                 tenant_id=tid, vertical=p["vertical"], level=level, rule=rule, reason=p.get("reason", ""), hour=hour,
-                habits=[h["desc"] for h in habits][:10] or "none", events=events or "none",
-                news=[n["headline"] for n in news] or "none")}], max_tokens=250, r=r)
+                habits=[guardrails.scrub_untrusted(h["desc"], 120) for h in habits][:10] or "none", events=events or "none",
+                news=[guardrails.scrub_untrusted(n["headline"], 160) for n in news] or "none")}], max_tokens=250, r=r)
             wl = str(res.get("final_level", final)).upper()
             if wl in LEVELS:
                 lowered = RANK[wl] < RANK[final]
-                if not (lowered and (not habit or level == "CRITICAL")):  # downgrade only when the graph backs it
+                if not (lowered and (not (habit or learn["suppress"]) or level == "CRITICAL")):  # downgrade only when the graph backs it
                     if wl != final:
                         decision = "LLM_ESCALATED" if RANK[wl] > RANK[final] else "LLM_SUPPRESSED_HABIT"
                     final = wl
             if res.get("rationale"):
                 rationale = str(res["rationale"])[:600]
             if res.get("speak_text"):
-                speak = str(res["speak_text"])[:200]
+                speak, _ = guardrails.clean_speech(res["speak_text"], final)
         except Exception:  # noqa: BLE001
             log.exception("Wonder call failed - keeping graph-policy decision")
 
-    out.update({"decision": decision, "habit_match": habit["desc"] if habit else None,
+    out.update({"decision": decision, "habit_match": habit["desc"] if habit else (learn["why"] if learn["suppress"] else None),
                 "news": [n["headline"] for n in news][:3]})
     log.info("%s %s/%s -> %s (%s)", tid, level, rule, final, decision)
     bus.publish("decided", tid, {**p, **out, "level": final, "rationale": rationale, "speak_text": speak}, r)

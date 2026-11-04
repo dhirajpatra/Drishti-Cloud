@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ImageOff, ShieldAlert, ShieldX } from "lucide-react";
+import { Check, ImageOff, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
 import { api, type Alert } from "../api";
 import { humanize, LEVEL_COLOR, relTime, useNow } from "../lib";
 import { Chip, Empty, ErrorLine, Panel, Pill, btnGhost } from "./ui";
 
 type ImgCache = Map<string, string>;
+type Verdict = "ack" | "confirmed" | "false_alarm";
 
 function AlertImage({ id, cache }: { id: string; cache: React.MutableRefObject<ImgCache> }) {
   const [url, setUrl] = useState<string | undefined>(cache.current.get(id));
@@ -26,12 +27,12 @@ function AlertImage({ id, cache }: { id: string; cache: React.MutableRefObject<I
   return <a href={url} target="_blank" rel="noreferrer" className="shrink-0 block"><img src={url} alt="Alert proof" className="w-full sm:w-40 h-28 object-cover rounded-lg border" style={{ borderColor: "var(--line)" }} /></a>;
 }
 
-function AlertCard({ a, now, cache, onAck }: { a: Alert; now: number; cache: React.MutableRefObject<ImgCache>; onAck: (id: string, fa: boolean) => Promise<void> }) {
-  const [busy, setBusy] = useState<"ack" | "fa" | null>(null);
+function AlertCard({ a, now, cache, onAck }: { a: Alert; now: number; cache: React.MutableRefObject<ImgCache>; onAck: (id: string, verdict: Verdict) => Promise<void> }) {
+  const [busy, setBusy] = useState<Verdict | null>(null);
   const c = LEVEL_COLOR[a.level];
-  const act = async (fa: boolean) => {
-    setBusy(fa ? "fa" : "ack");
-    try { await onAck(a.id, fa); } finally { setBusy(null); }
+  const act = async (v: Verdict) => {
+    setBusy(v);
+    try { await onAck(a.id, v); } finally { setBusy(null); }
   };
   return (
     <div className="rounded-xl border p-3 transition-opacity" style={{ borderColor: c, background: a.level === "CRITICAL" ? "var(--crit-bg)" : "var(--warn-bg)", opacity: a.acknowledged ? 0.45 : 1 }}>
@@ -54,8 +55,9 @@ function AlertCard({ a, now, cache, onAck }: { a: Alert; now: number; cache: Rea
           )}
           {!a.acknowledged && (
             <div className="flex gap-2 mt-3">
-              <button disabled={busy !== null} onClick={() => act(false)} className="mono text-[11px] px-3 py-1.5 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={{ borderColor: c, color: c }}><Check size={12} />{busy === "ack" ? "..." : "ACKNOWLEDGE"}</button>
-              <button disabled={busy !== null} onClick={() => act(true)} className="mono text-[11px] px-3 py-1.5 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={btnGhost}><ShieldX size={12} />{busy === "fa" ? "..." : "FALSE ALARM"}</button>
+              <button disabled={busy !== null} onClick={() => act("ack")} className="mono text-[11px] px-3 py-1.5 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={{ borderColor: c, color: c }}><Check size={12} />{busy === "ack" ? "..." : "ACKNOWLEDGE"}</button>
+              <button disabled={busy !== null} onClick={() => act("confirmed")} title="A real event: Drishti learns to trust this alert" className="mono text-[11px] px-3 py-1.5 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={{ borderColor: "var(--ok)", color: "var(--ok)" }}><ShieldCheck size={12} />{busy === "confirmed" ? "..." : "CONFIRMED"}</button>
+              <button disabled={busy !== null} onClick={() => act("false_alarm")} className="mono text-[11px] px-3 py-1.5 rounded-lg border flex items-center gap-1.5 disabled:opacity-50" style={btnGhost}><ShieldX size={12} />{busy === "false_alarm" ? "..." : "FALSE ALARM"}</button>
             </div>
           )}
         </div>
@@ -72,9 +74,9 @@ export function AlertFeed({ alerts, loading, error, reload }: { alerts: Alert[] 
     const c = cache.current;
     return () => { c.forEach((u) => URL.revokeObjectURL(u)); c.clear(); };
   }, []);
-  const onAck = async (id: string, fa: boolean) => {
+  const onAck = async (id: string, v: Verdict) => {
     setAckErr(null);
-    try { await api.ack(id, fa); reload(); } catch (e) { setAckErr(e instanceof Error ? e.message : String(e)); }
+    try { await api.ack(id, v === "false_alarm", v === "confirmed"); reload(); } catch (e) { setAckErr(e instanceof Error ? e.message : String(e)); }
   };
   const open = alerts?.filter((a) => !a.acknowledged).length ?? 0;
   return (

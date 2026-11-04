@@ -157,18 +157,15 @@ services:
     build: { <<: *py-build, args: { SERVICE: fridge-inventory-agent } }
     healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "fridge-inventory-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
 
-  grocery-price-agent:
+  grocery-price-agent:                 # optional (profile `extras`): estimated shelf prices from a camera frame
     <<: *agent
+    profiles: ["extras"]
     build: { <<: *py-build, args: { SERVICE: grocery-price-agent } }
     healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "grocery-price-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
 
-  icu-medicine-agent:
+  whatsapp-connector:                  # optional (profile `extras`): stand-alone WhatsApp test sender; alerts go through action-agent
     <<: *agent
-    build: { <<: *py-build, args: { SERVICE: icu-medicine-agent } }
-    healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "icu-medicine-agent"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
-
-  whatsapp-connector:
-    <<: *agent
+    profiles: ["extras"]
     build: { <<: *py-build, args: { SERVICE: whatsapp-connector } }
     healthcheck: { test: ["CMD", "python", "-m", "drishti.healthcheck", "whatsapp-connector"], interval: 30s, timeout: 5s, retries: 3, start_period: 20s }
 

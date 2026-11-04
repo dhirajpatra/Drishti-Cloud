@@ -58,6 +58,8 @@ class Settings:
         self.mock_mode = (not (self.llama_api_key or self.baseten_api_key)) if mm == "auto" else mm in {"1", "true", "yes", "on"}
 
         # --- cost control (LOW_COST_MODE)
+        self.storm_limit = _i("STORM_LIMIT", 12)                  # more ALERTs than this per window = digest (CRITICAL always passes)
+        self.storm_window_sec = _i("STORM_WINDOW_SEC", 300)
         self.low_cost_mode = _b("LOW_COST_MODE", True)
         self.event_images = _b("EVENT_IMAGES", True)               # keep a small annotated snapshot of every analysed frame
         self.event_image_ttl_sec = _i("EVENT_IMAGE_TTL_SEC", 21600)  # ...for this long (default 6 h)
