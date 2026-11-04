@@ -1,0 +1,21 @@
+# VPN option (site side): makes the camera network reachable from your Drishti server over Tailscale (free personal plan).
+# 1. Create an auth key at https://login.tailscale.com/admin/settings/keys   2. export TS_AUTHKEY=tskey-...
+# 3. In the Tailscale admin console, approve this machine's advertised subnet route.
+# 4. Install Tailscale on the machine that runs Drishti (or run the same container there without TS_ROUTES).
+# Then the camera URL stays exactly as it is on the LAN (rtsp://192.168.1.50:554/...), or use this machine's 100.x address.
+# CAUTION: two sites that both use 192.168.1.0/24 clash. Then use the edge agent (edge/camera-agent) instead.
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: drishti-site
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY}
+      TS_ROUTES: ${TS_ROUTES:-192.168.1.0/24}      # the camera LAN to share
+      TS_STATE_DIR: /var/lib/tailscale
+    volumes: ["ts-state:/var/lib/tailscale"]
+    restart: unless-stopped
+volumes:
+  ts-state:

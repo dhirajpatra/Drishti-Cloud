@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Camera, Check, Plus, RotateCcw, Save, ShieldAlert, Trash2, Wifi } from "lucide-react";
+import { ConnectCamera } from "../components/ConnectCamera";
 import { api, type AdminConfig, type AdminOverview, type AdminTenant, type AlertLevel, type CameraConn, type CameraForm, type CustomRule, type LabelRule, type SiteCfg, type TestResult } from "../api";
 import { usePoll } from "../lib";
 import { Chip, Empty, ErrorLine, Panel, Pill, btnGhost, btnPrimary, inputCls, inputStyle } from "../components/ui";
@@ -117,6 +118,15 @@ function Connection({ tenant, camera, reload }: { tenant: string; camera: string
       {test && (test.ok
         ? <div><p className="mono text-[11px] mb-1" style={{ color: "var(--ok)" }}>✓ Connected, picture received ({Math.round(test.bytes / 1024)} KB)</p>{test.preview && <img src={test.preview} alt="Camera preview" className="rounded-lg border max-h-56" style={{ borderColor: "var(--line)" }} />}</div>
         : <p className="mono text-[11px]" style={{ color: "var(--bad)" }}>✗ Could not get a picture: {test.error}</p>)}
+      {test?.stages && test.stages.length > 0 && (
+        <ol className="space-y-0.5">
+          {test.stages.map((st) => (
+            <li key={st.stage} className="text-[11px]">
+              <span className="mono" style={{ color: st.ok ? "var(--ok)" : "var(--bad)" }}>{st.ok ? "✓" : "✗"} {st.stage}</span>
+              <span style={{ color: "var(--muted)" }}> {st.detail}</span>
+              {!st.ok && st.hint && <p className="ml-4" style={{ color: "var(--warn)" }}>→ {st.hint}</p>}
+            </li>))}
+        </ol>)}
     </form>
   );
 }
@@ -390,7 +400,7 @@ export default function Admin() {
           </ul>
           <p className="mono text-[10px] mt-3" style={{ color: "var(--muted)" }}>● = has custom settings</p>
         </Panel>
-        {t ? <Editor key={`${t.id}/${cam}`} t={t} camera={cam} ov={ov.data} reload={ov.reload} /> : <Empty>Select a site.</Empty>}
+        {t ? (<div className="space-y-4 min-w-0"><ConnectCamera key={`c-${t.id}`} tenant={t.id} camera={cam} /><Editor key={`${t.id}/${cam}`} t={t} camera={cam} ov={ov.data} reload={ov.reload} /></div>) : <Empty>Select a site.</Empty>}
       </div>
     </div>
   );

@@ -224,6 +224,16 @@ Each tenant Pi:
 - Input: USB 2.0 Mini Mic (main mic), 2x HC-SR04 with 1k/2k divider (Echo 5V->3.3V), PIR HC-SR501, IR Obstacle, DHT11, APDS-9960 gesture, ISD1820 Voice Module
 - Output: PAM8403 amp (VCC Pin2 5V, GND Pin6, audio from Pi 3.5mm jack to L/R/GND), 2 inch 4Ohm 5W woofer speaker (L+/L-), SSD1306 OLED 0.96 I2C
 
+## 7b. Remote cameras, guardrails and learning (added during the hackathon)
+
+- **Private RTSP from anywhere**: `edge/camera-agent` runs at the site and pushes frames to `POST /ingest/{tenant}` with a per-site token (`X-Edge-Token`, created with
+  `POST /tenants/{id}/edge-tokens`, hashed, one tenant, revocable). VPN (Tailscale / WireGuard) and ngrok TCP templates are in `deploy/remote/`. Guide: `docs/REMOTE_CAMERAS.md`.
+- `common/drishti/camurl.py`: `tcp://` -> `rtsp://`, credential redaction, forbidden camera hosts (loopback, metadata, Drishti's own services) checked at save time and after DNS,
+  staged `dns -> tcp -> rtsp -> frame` diagnosis returned by the Admin TEST CONNECTION. `ALLOW_PRIVATE_CAMERA_HOSTS=false` on a shared cloud server.
+- Camera-only sites: a changing picture counts as motion, so `no_motion_2h` does not fire without a PIR sensor.
+- `common/drishti/guardrails.py` (G1-G6) and `learning.py` (operator feedback with a safety floor): see AGENT.md.
+- Agent contributor guide: **AGENT.md**.
+
 ## 8. Environment Variables
 
 ```
@@ -234,6 +244,8 @@ REDIS_URI=redis://redis:6379
 LOW_COST_MODE=true # 30 sec sampling
 RTSP_FEEDS=rtsp://mall_cam_1,rtsp://senior_home_kitchen
 NEWS_API_KEY=xxx
+ALLOW_PRIVATE_CAMERA_HOSTS=true   # false on a shared cloud server
+STORM_LIMIT=12 STORM_WINDOW_SEC=300   # alert-storm breaker (CRITICAL always passes)
 ```
 
 ## 9. Commands for Muse Code

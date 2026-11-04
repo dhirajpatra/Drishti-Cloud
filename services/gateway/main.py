@@ -95,6 +95,18 @@ def require_tenant(tenant_id: str, request: Request) -> dict:
     return t
 
 
+def require_ingest(tenant_id: str, request: Request) -> dict:
+    """Frame ingest accepts the tenant key / admin token as before, OR a site token (`X-Edge-Token`) from the edge camera
+    agent. A site token works for this one route and this one tenant only: it cannot read data or change settings."""
+    token = request.headers.get("x-edge-token", "")
+    if token:
+        t = _tenant(tenant_id)
+        if not db.verify_edge_token(tenant_id, token):
+            raise HTTPException(401, "invalid or revoked site token")
+        return t
+    return require_tenant(tenant_id, request)
+
+
 def _public(t: dict) -> dict:
     return {k: v for k, v in t.items() if k != "api_key"}
 
@@ -247,7 +259,7 @@ def ingest(
     force: bool = Form(False),
     burst: list[UploadFile] = File(default=[]),     # earlier frames of the last few seconds, oldest first (motion hook)
 ):
-    t = require_tenant(tenant_id, request)
+    t = require_ingest(tenant_id, request)
     r = bus.redis_client()
 
     if not bus.allow(f"rl:{tenant_id}", settings.max_frames_per_min, 60, r):
@@ -561,6 +573,36 @@ def ack_alert(alert_id: str, request: Request, body: AckIn = Body(default_factor
             a["tenant_id"], None, f"Learned: '{a['rule']}' around {hour:02d}:00 was a false alarm",
             rule=a["rule"], start_hour=hour, end_hour=min(24, hour + 1), learned=True,
         )
+    return {"ok": True}
+
+
+class EdgeTokenIn(BaseModel):
+    label: str = Field(default="", max_length=60)
+
+
+@app.post("/tenants/{tenant_id}/edge-tokens", status_code=201)
+def create_edge_token(tenant_id: str, body: EdgeTokenIn, request: Request):
+    """Pair a site: returns a token ONCE. The edge agent at the camera uses it to push frames; nothing else."""
+    require_tenant(tenant_id, request)
+    row, token = db.create_edge_token(tenant_id, body.label.strip())
+    return {**_iso([row], "created_at", "last_seen")[0], "token": token}
+
+
+@app.get("/tenants/{tenant_id}/edge-tokens")
+def list_edge_tokens(tenant_id: str, request: Request):
+    require_tenant(tenant_id, request)
+    return _iso(db.list_edge_tokens(tenant_id), "created_at", "last_seen")
+
+
+@app.delete("/tenants/{tenant_id}/edge-tokens/{token_id}")
+def revoke_edge_token(tenant_id: str, token_id: str, request: Request):
+    require_tenant(tenant_id, request)
+    try:
+        n = db.revoke_edge_token(tenant_id, token_id)
+    except Exception:  # noqa: BLE001 - malformed uuid
+        n = 0
+    if not n:
+        raise HTTPException(404, "no live token with that id")
     return {"ok": True}
 
 

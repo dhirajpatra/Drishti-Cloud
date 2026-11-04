@@ -58,6 +58,7 @@ class Settings:
         self.mock_mode = (not (self.llama_api_key or self.baseten_api_key)) if mm == "auto" else mm in {"1", "true", "yes", "on"}
 
         # --- cost control (LOW_COST_MODE)
+        self.allow_private_camera_hosts = _b("ALLOW_PRIVATE_CAMERA_HOSTS", True)   # false on a shared cloud server: LAN IPs are unreachable there anyway
         self.storm_limit = _i("STORM_LIMIT", 12)                  # more ALERTs than this per window = digest (CRITICAL always passes)
         self.storm_window_sec = _i("STORM_WINDOW_SEC", 300)
         self.low_cost_mode = _b("LOW_COST_MODE", True)

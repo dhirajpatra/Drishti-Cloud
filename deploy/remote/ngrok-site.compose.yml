@@ -1,0 +1,14 @@
+# Tunnel option (site side): publishes ONE camera's RTSP port through an ngrok TCP tunnel.
+# 1. Get an authtoken at https://dashboard.ngrok.com   2. export NGROK_AUTHTOKEN=...   3. docker compose -f ngrok-site.compose.yml up
+# ngrok prints   tcp://0.tcp.in.ngrok.io:12345   ->  in Drishti (Admin > Cameras) use host 0.tcp.in.ngrok.io, port 12345, protocol rtsp,
+# the camera's usual path, username and password.
+# Honest limits: free TCP tunnels may need a verified ngrok account; the address CHANGES every restart (update host and port);
+# the tunnel provider carries the stream; anyone who learns the address can try your camera password. Prefer the edge agent or a VPN.
+services:
+  ngrok:
+    image: ngrok/ngrok:latest
+    command: ["tcp", "${CAMERA_HOST:-192.168.1.50}:${CAMERA_PORT:-554}"]
+    network_mode: host
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?set NGROK_AUTHTOKEN}
+    restart: unless-stopped

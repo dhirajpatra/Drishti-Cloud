@@ -154,7 +154,9 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int, cfg: dict | 
     # NX = start the clock the first time we see a tenant, so "never moves" still alerts after the threshold
     r.set(f"rstate:{tid}:last_motion", now, nx=True, ex=7 * 86400)
     r.set(f"rstate:{tid}:last_staff", now, nx=True, ex=7 * 86400)
-    if sensors.get("pir") is True:
+    # Motion = the PIR sensor, or - on a camera-only site that has no PIR at all - the picture itself changing
+    motion_seen = sensors.get("pir") is True or ("pir" not in sensors and p.get("static") is False)
+    if motion_seen:
         r.set(f"rstate:{tid}:last_motion", now, ex=7 * 86400)
     if "staff" in labels:
         r.set(f"rstate:{tid}:last_staff", now, ex=7 * 86400)
@@ -200,7 +202,7 @@ def evaluate(vertical: str, p: dict, r: redis.Redis, now_hour: int, cfg: dict | 
         last_motion = r.get(f"rstate:{tid}:last_motion")
         quiet = now - float(last_motion) if last_motion else 0.0
         quiet = _elapsed(p, "no_motion", quiet)
-        if sensors.get("pir") is not True and quiet >= T("no_motion_sec") and not _is_night(hour, cfg):
+        if not motion_seen and quiet >= T("no_motion_sec") and not _is_night(hour, cfg):
             out.append(_hit("no_motion_2h", "ALERT", f"No motion for {int(quiet // 60)} minutes", [],
                             "I have not seen you move for a while. Are you alright?"))
         door = sensors.get("us_door")

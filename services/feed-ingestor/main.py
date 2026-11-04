@@ -19,7 +19,7 @@ import cv2  # noqa: E402
 import httpx  # noqa: E402
 import redis  # noqa: E402
 
-from drishti import bus, siteconfig  # noqa: E402
+from drishti import bus, camurl, siteconfig  # noqa: E402
 from drishti.config import settings  # noqa: E402
 from drishti.log import get_logger  # noqa: E402
 from drishti.verticals import VERTICALS  # noqa: E402
@@ -47,6 +47,11 @@ def grab_snapshot(url: str) -> bytes | None:
 
 
 def grab(feed: dict) -> bytes | None:
+    feed = {**feed, "url": camurl.normalize_url(feed["url"])}
+    try:
+        camurl.guard_url(feed["url"], settings.allow_private_camera_hosts)   # never connect to Drishti's own services / metadata
+    except camurl.HostNotAllowed as exc:
+        raise RuntimeError(str(exc)) from None
     if feed["url"].lower().startswith(("http://", "https://")):
         try:
             data = grab_snapshot(feed["url"])
@@ -125,6 +130,7 @@ def push(feed: dict, sensors: dict | None = None, burst: int = 1) -> None:
         )
         if resp.status_code == 200:
             _warned.discard(key)
+            _fails.pop((feed["tenant"], feed["camera"]), None)
             _status(feed, True, "")
             body = resp.json()
             log.info("%s -> queued (static=%s, change=%s)", key, body.get("static"), body.get("change"))
@@ -134,10 +140,24 @@ def push(feed: dict, sensors: dict | None = None, burst: int = 1) -> None:
         if resp.status_code != 200:
             _status(feed, False, f"gateway HTTP {resp.status_code}")
     except Exception as exc:  # noqa: BLE001
-        _status(feed, False, str(exc)[:200])
+        msg = camurl.redact(str(exc))
+        _status(feed, False, msg[:200])
+        _back_off(feed)
         if key not in _warned:  # log a flapping camera once, not every 30 s
             _warned.add(key)
-            log.error("%s failed: %s", key, exc)
+            log.error("%s failed: %s", key, msg)
+
+
+_fails: dict[tuple[str, str], int] = {}
+MAX_BACKOFF = 8
+
+
+def _back_off(feed: dict) -> None:
+    """A tunnel that dropped or a camera that is off is retried less and less often (x2, x4, x8 the interval), then
+    returns to normal as soon as it answers again. Saves bandwidth, log noise and model-free CPU on dead links."""
+    key = (feed["tenant"], feed["camera"])
+    _fails[key] = n = _fails.get(key, 0) + 1
+    _due[key] = time.time() + feed.get("interval", settings.sample_interval_sec) * min(MAX_BACKOFF, 2 ** min(n, 3))
 
 
 def all_feeds(env_spec: str | None = None) -> dict[tuple[str, str], dict]:
@@ -150,11 +170,19 @@ def test_connection(raw: str) -> None:
     """Admin 'Test connection': grab one frame with the saved (or just-typed) settings and report back through Redis."""
     req = json.loads(raw)
     r = bus.redis_client()
-    out: dict = {"ok": False, "error": "", "bytes": 0}
+    out: dict = {"ok": False, "error": "", "bytes": 0, "stages": []}
     try:
+        stages = camurl.diagnose(req["url"], allow_private=settings.allow_private_camera_hosts)
+        out["stages"] = stages
+        failed = next((st for st in stages if not st["ok"]), None)
+        if failed:                                    # say WHICH step broke instead of a bare "no picture"
+            out["error"] = f"{failed['stage']}: {failed['detail']}"
+            r.set(f"camtest:res:{req['id']}", json.dumps(out), ex=120)
+            return
         feed = {"tenant": req["tenant"], "camera": "_test", "url": req["url"], "interval": 30}
         data = grab(feed)
-        out.update(ok=bool(data), bytes=len(data or b""), error="" if data else "no picture returned")
+        out.update(ok=bool(data), bytes=len(data or b""), error="" if data else "connected, but no picture came back (wrong stream path, or wrong username / password)")
+        out["stages"].append({"stage": "frame", "ok": bool(data), "detail": f"{len(data or b'')} bytes" if data else "no picture"})
         if data:
             bus.redis_bin().set(f"camtest:img:{req['id']}", data, ex=120)
     except Exception as exc:  # noqa: BLE001
